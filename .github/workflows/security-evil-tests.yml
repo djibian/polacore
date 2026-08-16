@@ -17,11 +17,11 @@ permissions:
   contents: read
 
 jobs:
-  persistent-credential-authority:
+  security-evil-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Build and run SecurityFloor persistence probes
         run: bash tests/evil/run_persistent_credential_authority.sh
-      - name: Enforce filesystem authority policy
-        run: python3 tests/evil/test_filesystem_authority_policy.py
+      - name: Enforce RuntimeConfinementProfile and OCI mutations
+        run: python3 tests/evil/test_runtime_confinement_policy.py
