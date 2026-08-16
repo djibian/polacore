@@ -39,3 +39,20 @@ This is direct test evidence that the proposed pre-exec SecurityFloor can remove
 ### Pareto conclusion
 
 Prefer **deny creation by construction** over a cleanup daemon that tries to discover every persistent Linux object after the worker exits. The eventual production profile should converge from this explicit deny test toward a small architecture-checked syscall allowlist derived from the real compilerless Wasmtime runtime.
+
+## Filesystem authority policy
+
+`test_filesystem_authority_policy.py` validates `security/runtime-filesystem-profile-v0.json` and mutation-tests the rule that Runtime Workers receive no durable writable filesystem authority.
+
+Standard v0 currently requires:
+
+- read-only worker rootfs;
+- no durable writable paths;
+- no writable mounts;
+- no persistent path or object owned by the ephemeral worker UID/GID;
+- no path opens or file creation after `READY`;
+- explicit protection against shadowing runtime/native paths.
+
+The mutation suite intentionally enables a writable rootfs, durable `/tmp`, persistent upload staging, a writable bind mount, a worker-owned cache, helper-materialized persistent ownership, post-READY opens, and post-READY file creation. Every mutation must be rejected.
+
+This is an executable **policy proof**, not yet proof about the final launcher/container mount namespace. It prevents the design from silently reintroducing a durable writable path while the launcher is being built. The final proof must bind this profile to the effective runtime/mount configuration and demonstrate the same property against the real worker.
