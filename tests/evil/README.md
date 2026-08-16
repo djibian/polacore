@@ -40,19 +40,22 @@ This is direct test evidence that the proposed pre-exec SecurityFloor can remove
 
 Prefer **deny creation by construction** over a cleanup daemon that tries to discover every persistent Linux object after the worker exits. The eventual production profile should converge from this explicit deny test toward a small architecture-checked syscall allowlist derived from the real compilerless Wasmtime runtime.
 
-## Filesystem authority policy
+## Runtime confinement policy
 
-`test_filesystem_authority_policy.py` validates `security/runtime-filesystem-profile-v0.json` and mutation-tests the rule that Runtime Workers receive no durable writable filesystem authority.
+`test_runtime_confinement_policy.py` validates the single source of policy truth, `security/runtime-confinement-profile-v0.json`, and mutation-tests both the abstract Standard v0 policy and a representative effective OCI runtime configuration.
 
 Standard v0 currently requires:
 
 - read-only worker rootfs;
 - no durable writable paths;
-- no writable mounts;
 - no persistent path or object owned by the ephemeral worker UID/GID;
+- no runtime-added mounts;
+- no OCI lifecycle hooks;
+- private rootfs mount propagation;
+- `noNewPrivileges=true`;
 - no path opens or file creation after `READY`;
 - explicit protection against shadowing runtime/native paths.
 
-The mutation suite intentionally enables a writable rootfs, durable `/tmp`, persistent upload staging, a writable bind mount, a worker-owned cache, helper-materialized persistent ownership, post-READY opens, and post-READY file creation. Every mutation must be rejected.
+The mutation suite intentionally enables a writable rootfs, durable `/tmp`, worker-owned persistent state, post-READY opens/creation, shared mount propagation, lifecycle hooks, writable bind mounts, and even **read-only bind mounts that shadow `/app/lib` or `/usr/lib`**. Every mutation must be rejected.
 
-This is an executable **policy proof**, not yet proof about the final launcher/container mount namespace. It prevents the design from silently reintroducing a durable writable path while the launcher is being built. The final proof must bind this profile to the effective runtime/mount configuration and demonstrate the same property against the real worker.
+This is an executable **policy/configuration proof**, not yet proof about the final launcher or a real OCI runtime mount namespace. It prevents the design from silently reintroducing filesystem authority and catches the important distinction between an authentic image and a dangerous effective runtime configuration. The final proof must bind this profile to the configuration actually used to create the worker and demonstrate the same property against the real runtime.
