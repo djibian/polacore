@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "name": "standard-v0",
+  "rootfs": {
+    "readonly": true,
+    "durable_writable_paths": [],
+    "worker_owned_persistent_paths": [],
+    "worker_owned_persistent_objects": false,
+    "forbidden_shadow_prefixes": [
+      "/app",
+      "/bin",
+      "/etc",
+      "/lib",
+      "/lib64",
+      "/sbin",
+      "/usr"
+    ]
+  },
+  "oci": {
+    "allowed_mounts": [],
+    "hooks_allowed": false,
+    "rootfs_propagation": "private",
+    "no_new_privileges": true
+  },
+  "post_ready": {
+    "path_opens": false,
+    "file_creation": false
+  },
+  "notes": "Standard v0 exposes no durable writable filesystem authority or runtime-added mounts to Runtime Workers. Persistent component state is mediated by Broker/Storage. The effective OCI runtime configuration must satisfy this profile before launch."
+}
