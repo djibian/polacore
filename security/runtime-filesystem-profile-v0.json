@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "root_readonly": true,
+  "durable_writable_paths": [],
+  "writable_mounts": [],
+  "worker_owned_persistent_paths": [],
+  "worker_owned_persistent_objects": false,
+  "post_ready_path_opens": false,
+  "post_ready_file_creation": false,
+  "forbidden_shadow_prefixes": [
+    "/app",
+    "/bin",
+    "/etc",
+    "/lib",
+    "/lib64",
+    "/sbin",
+    "/usr"
+  ],
+  "notes": "Standard v0 intentionally exposes no durable writable filesystem authority to Runtime Workers. Persistent component state must be mediated by the Broker/Storage service."
+}
