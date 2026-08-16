@@ -1,0 +1,23 @@
+name: Security Evil Tests
+
+on:
+  push:
+    branches: [engineering]
+    paths:
+      - 'tests/evil/**'
+      - '.github/workflows/security-evil-tests.yml'
+  pull_request:
+    paths:
+      - 'tests/evil/**'
+      - '.github/workflows/security-evil-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  persistent-credential-authority:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run SecurityFloor persistence probes
+        run: bash tests/evil/run_persistent_credential_authority.sh
