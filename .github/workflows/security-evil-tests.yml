@@ -31,3 +31,5 @@ jobs:
         run: python3 security/lint_runtime_config.py --bundle tests/fixtures/oci
       - name: Prove path reopen TOCTOU and retained O_PATH identity
         run: python3 tests/evil/bundle_toctou_binding.py
+      - name: Probe fd-bound detached mount semantics when permitted
+        run: python3 tests/evil/mount_fd_binding_probe.py
