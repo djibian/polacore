@@ -1,0 +1,7 @@
+{
+  "ociVersion": "1.2.0",
+  "root": {"path": "rootfs", "readonly": true},
+  "process": {"cwd": "/", "noNewPrivileges": true},
+  "mounts": [],
+  "linux": {"rootfsPropagation": "private"}
+}
