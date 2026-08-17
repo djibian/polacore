@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 import copy
-import importlib.util
+import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SECURITY = ROOT / "security"
 sys.path.insert(0, str(SECURITY))
-from lint_runtime_config import load_json, validate_profile, validate_oci_config
+from lint_runtime_config import load_json, validate_profile, validate_oci_config, validate_bundle
 
 PROFILE_PATH = SECURITY / "runtime-confinement-profile-v0.json"
-BASELINE_CONFIG_PATH = ROOT / "tests" / "fixtures" / "oci" / "config-standard-v0.json"
+BASELINE_BUNDLE_PATH = ROOT / "tests" / "fixtures" / "oci"
+BASELINE_CONFIG_PATH = BASELINE_BUNDLE_PATH / "config-standard-v0.json"
 
 
 def load_profile():
@@ -49,13 +52,36 @@ def add_mount(config, destination, options=None):
     })
 
 
+def write_config(bundle, config):
+    (bundle / "config.json").write_text(json.dumps(config, indent=2) + "\n")
+
+
+def assert_bundle_rejected(name, mutate):
+    profile = load_profile()
+    with tempfile.TemporaryDirectory(prefix="polacore-bundle-") as temp:
+        bundle = Path(temp) / "bundle"
+        shutil.copytree(BASELINE_BUNDLE_PATH, bundle, symlinks=True)
+        config = load_json(bundle / "config.json")
+        mutate(bundle, config)
+        write_config(bundle, config)
+        errors, _evidence = validate_bundle(profile, bundle)
+        if not errors:
+            raise AssertionError(f"bundle mutation unexpectedly accepted: {name}")
+        print(f"PASS reject bundle {name}: {', '.join(errors)}")
+
+
 def main():
     profile = load_profile()
     config = baseline_oci_config()
     errors = validate_profile(profile) + validate_oci_config(profile, config)
     if errors:
-        raise AssertionError("baseline invalid: " + "; ".join(errors))
-    print("PASS canonical RuntimeConfinementProfile v0 + deployment fixture")
+        raise AssertionError("baseline config invalid: " + "; ".join(errors))
+    bundle_errors, evidence = validate_bundle(profile, BASELINE_BUNDLE_PATH)
+    if bundle_errors:
+        raise AssertionError("baseline bundle invalid: " + "; ".join(bundle_errors))
+    if not evidence.get("config_sha256") or not evidence.get("root_st_ino"):
+        raise AssertionError("baseline bundle evidence incomplete")
+    print("PASS canonical RuntimeConfinementProfile v0 + concrete deployment bundle")
 
     assert_profile_rejected("writable rootfs", lambda p: p["rootfs"].__setitem__("readonly", False))
     assert_profile_rejected("durable /tmp", lambda p: p["rootfs"].__setitem__("durable_writable_paths", ["/tmp"]))
@@ -78,6 +104,18 @@ def main():
     assert_config_rejected("dotdot mount destination", lambda c: add_mount(c, "/cache/../app/lib"))
     assert_config_rejected("double-slash mount destination", lambda c: add_mount(c, "/app//lib"))
     assert_config_rejected("trailing-slash mount destination", lambda c: add_mount(c, "/cache/"))
+
+    assert_bundle_rejected("absolute root.path", lambda _b, c: c["root"].__setitem__("path", "/tmp/evil-rootfs"))
+    assert_bundle_rejected("dotdot root.path", lambda _b, c: c["root"].__setitem__("path", "../evil-rootfs"))
+    assert_bundle_rejected("rootfs final symlink", lambda b, _c: (shutil.rmtree(b / "rootfs"), (b / "rootfs").symlink_to("outside", target_is_directory=True)))
+
+    def intermediate_symlink(bundle, config):
+        original = bundle / "rootfs"
+        real = bundle / "rootfs-real"
+        original.rename(real)
+        (bundle / "link").symlink_to(".", target_is_directory=True)
+        config["root"]["path"] = "link/rootfs-real"
+    assert_bundle_rejected("rootfs intermediate symlink", intermediate_symlink)
 
     print("PASS all mutations rejected by canonical linter implementation")
 
