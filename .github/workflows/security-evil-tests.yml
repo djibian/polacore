@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build and run SecurityFloor persistence probes
         run: bash tests/evil/run_persistent_credential_authority.sh
-      - name: Enforce RuntimeConfinementProfile and OCI mutations
+      - name: Enforce RuntimeConfinementProfile, OCI and bundle mutations
         run: python3 tests/evil/test_runtime_confinement_policy.py
-      - name: Lint canonical Standard v0 OCI deployment config
-        run: python3 security/lint_runtime_config.py tests/fixtures/oci/config-standard-v0.json
+      - name: Lint canonical Standard v0 OCI deployment bundle
+        run: python3 security/lint_runtime_config.py --bundle tests/fixtures/oci
