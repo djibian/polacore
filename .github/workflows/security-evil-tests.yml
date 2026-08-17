@@ -29,3 +29,5 @@ jobs:
         run: python3 tests/evil/test_runtime_confinement_policy.py
       - name: Lint canonical Standard v0 OCI deployment bundle
         run: python3 security/lint_runtime_config.py --bundle tests/fixtures/oci
+      - name: Prove path reopen TOCTOU and retained O_PATH identity
+        run: python3 tests/evil/bundle_toctou_binding.py
