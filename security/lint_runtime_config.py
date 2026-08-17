@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Fail-closed linter for PolaCore RuntimeConfinementProfile v0 + OCI config.json."""
+"""Fail-closed linter for PolaCore RuntimeConfinementProfile v0 + OCI deployment bundle."""
 import argparse
+import hashlib
 import json
+import os
 import posixpath
+import stat
 import sys
 from pathlib import Path
 
@@ -16,6 +19,17 @@ def canonical_abs_path(value):
         raise ValueError("path must be absolute")
     normalized = posixpath.normpath(value)
     if normalized != value.rstrip("/") and not (value == "/" and normalized == "/"):
+        raise ValueError("path must already be normalized")
+    return normalized
+
+
+def canonical_relative_path(value):
+    if not isinstance(value, str) or not value or value.startswith("/"):
+        raise ValueError("path must be non-empty and relative")
+    normalized = posixpath.normpath(value)
+    if normalized in (".", "..") or normalized.startswith("../"):
+        raise ValueError("path must stay below bundle")
+    if normalized != value.rstrip("/"):
         raise ValueError("path must already be normalized")
     return normalized
 
@@ -85,21 +99,132 @@ def validate_oci_config(profile, config):
     return errors
 
 
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _reject_symlink_components(bundle, relative_path):
+    errors = []
+    current = bundle
+    for part in Path(relative_path).parts:
+        current = current / part
+        try:
+            mode = os.lstat(current).st_mode
+        except OSError as exc:
+            errors.append(f"rootfs component unavailable: {current}: {exc.strerror}")
+            break
+        if stat.S_ISLNK(mode):
+            errors.append(f"rootfs component must not be a symlink: {current}")
+            break
+    return errors
+
+
+def validate_bundle(profile, bundle_dir):
+    """Validate config.json and bind it to an existing, non-symlink rootfs below bundle.
+
+    This closes lexical/symlink escapes at validation time. It is intentionally not
+    claimed to close validation->runtime TOCTOU; the launcher must later keep a
+    stable handle/identity to the validated object through create/start.
+    """
+    errors = []
+    evidence = {}
+    bundle = Path(bundle_dir)
+    try:
+        bundle_lstat = os.lstat(bundle)
+    except OSError as exc:
+        return [f"bundle unavailable: {exc.strerror}"], evidence
+    if stat.S_ISLNK(bundle_lstat.st_mode):
+        return ["bundle path itself must not be a symlink"], evidence
+    if not stat.S_ISDIR(bundle_lstat.st_mode):
+        return ["bundle path must be a directory"], evidence
+
+    config_path = bundle / "config.json"
+    try:
+        config_lstat = os.lstat(config_path)
+    except OSError as exc:
+        return [f"bundle config.json unavailable: {exc.strerror}"], evidence
+    if stat.S_ISLNK(config_lstat.st_mode) or not stat.S_ISREG(config_lstat.st_mode):
+        return ["bundle config.json must be a regular non-symlink file"], evidence
+
+    try:
+        config = load_json(config_path)
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"invalid bundle config.json: {exc}"], evidence
+    errors.extend(validate_oci_config(profile, config))
+
+    root_value = (config.get("root") or {}).get("path")
+    try:
+        root_rel = canonical_relative_path(root_value)
+    except ValueError as exc:
+        errors.append(f"OCI root.path invalid: {root_value!r}: {exc}")
+        return errors, evidence
+
+    errors.extend(_reject_symlink_components(bundle, root_rel))
+    root_path = bundle / root_rel
+    if errors:
+        return errors, evidence
+    try:
+        root_lstat = os.lstat(root_path)
+    except OSError as exc:
+        errors.append(f"rootfs unavailable: {exc.strerror}")
+        return errors, evidence
+    if not stat.S_ISDIR(root_lstat.st_mode):
+        errors.append("OCI root.path must identify a directory")
+        return errors, evidence
+
+    bundle_real = bundle.resolve(strict=True)
+    root_real = root_path.resolve(strict=True)
+    try:
+        root_real.relative_to(bundle_real)
+    except ValueError:
+        errors.append("OCI root.path escapes bundle")
+        return errors, evidence
+
+    evidence = {
+        "config_sha256": _sha256_file(config_path),
+        "root_path": root_rel,
+        "root_st_dev": root_lstat.st_dev,
+        "root_st_ino": root_lstat.st_ino,
+    }
+    return errors, evidence
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("config", help="OCI runtime config.json")
+    parser.add_argument("config", nargs="?", help="OCI runtime config.json")
+    parser.add_argument("--bundle", help="OCI bundle directory containing config.json and rootfs")
     parser.add_argument("--profile", default=str(Path(__file__).with_name("runtime-confinement-profile-v0.json")))
     args = parser.parse_args()
+    if bool(args.config) == bool(args.bundle):
+        parser.error("provide exactly one of CONFIG or --bundle BUNDLE")
     try:
         profile = load_json(args.profile)
-        config = load_json(args.config)
     except (OSError, json.JSONDecodeError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr); return 2
-    errors = validate_profile(profile) + validate_oci_config(profile, config)
+
+    errors = validate_profile(profile)
+    evidence = None
+    if args.bundle:
+        bundle_errors, evidence = validate_bundle(profile, args.bundle)
+        errors += bundle_errors
+    else:
+        try:
+            config = load_json(args.config)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"FAIL: {exc}", file=sys.stderr); return 2
+        errors += validate_oci_config(profile, config)
+
     if errors:
         for error in errors: print(f"FAIL: {error}", file=sys.stderr)
         return 1
-    print("PASS RuntimeConfinementProfile v0 + OCI config")
+    if evidence:
+        print("PASS RuntimeConfinementProfile v0 + OCI bundle " + json.dumps(evidence, sort_keys=True))
+    else:
+        print("PASS RuntimeConfinementProfile v0 + OCI config")
     return 0
 
 
