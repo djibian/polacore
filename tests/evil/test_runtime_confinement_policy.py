@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import copy
 import json
 import shutil
 import sys
@@ -13,7 +12,7 @@ from lint_runtime_config import load_json, validate_profile, validate_oci_config
 
 PROFILE_PATH = SECURITY / "runtime-confinement-profile-v0.json"
 BASELINE_BUNDLE_PATH = ROOT / "tests" / "fixtures" / "oci"
-BASELINE_CONFIG_PATH = BASELINE_BUNDLE_PATH / "config-standard-v0.json"
+BASELINE_CONFIG_PATH = BASELINE_BUNDLE_PATH / "config.json"
 
 
 def load_profile():
@@ -107,7 +106,13 @@ def main():
 
     assert_bundle_rejected("absolute root.path", lambda _b, c: c["root"].__setitem__("path", "/tmp/evil-rootfs"))
     assert_bundle_rejected("dotdot root.path", lambda _b, c: c["root"].__setitem__("path", "../evil-rootfs"))
-    assert_bundle_rejected("rootfs final symlink", lambda b, _c: (shutil.rmtree(b / "rootfs"), (b / "rootfs").symlink_to("outside", target_is_directory=True)))
+
+    def final_symlink(bundle, _config):
+        rootfs = bundle / "rootfs"
+        shutil.rmtree(rootfs)
+        (bundle / "outside").mkdir()
+        rootfs.symlink_to("outside", target_is_directory=True)
+    assert_bundle_rejected("rootfs final symlink", final_symlink)
 
     def intermediate_symlink(bundle, config):
         original = bundle / "rootfs"
