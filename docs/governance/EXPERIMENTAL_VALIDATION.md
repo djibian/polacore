@@ -1,53 +1,58 @@
-# PolaCore Experimental Validation Doctrine
+# PolaCore Organizational Experimentation Doctrine
 
-## Role of PolaCore
+## Purpose
 
-PolaCore is the experimental laboratory for engineering mechanisms, security properties, agent workflows, CI oracles, and development practices that may later be adopted by production-oriented projects such as WebeeBlocks.
+PolaCore is first and foremost its own secure CMS project. In parallel, its development process is used as a **testbed for organizational mechanisms**: agent roles, review structure, evidence discipline, issue/PR workflow, CI interpretation, escalation rules, independence between builder and verifier, and automation of the engineering loop.
 
-PolaCore is allowed to explore, fail, refute assumptions, compare alternatives, and retain negative results. WebeeBlocks must not be used as the first place to discover whether a cross-project engineering mechanism is sound.
+The organizational objective is empirical: try a workflow on real PolaCore work, observe whether it improves rigor, autonomy, speed, causal diagnosis, review quality, and human intervention cost, then keep, modify, or reject it.
 
-This doctrine does not turn PolaCore into a generic dumping ground: experiments must still be relevant, bounded, reproducible, and connected to an explicit question.
+This document governs the organization of PolaCore only. It creates **no dependency, communication channel, promotion pipeline, shared backlog, shared state, or cross-project workflow with any other repository**.
 
-## One-way promotion rule
+## What may be experimented with
 
-Cross-project transfer is one-way by default:
+Examples include:
 
-`PolaCore experiment -> independent falsification/review -> validated reusable pattern -> WebeeBlocks adoption`
+- Lead / Experimenter / Adversary / Reviewer / Builder / Verification role boundaries;
+- adaptive pipelines depending on risk and uncertainty;
+- GitHub as durable project memory;
+- issue and PR contracts;
+- evidence vocabularies;
+- causal-bottleneck discipline;
+- independent review and red-team passes;
+- Copilot or other GitHub-native reviewer roles;
+- automation of hand-offs and repetitive coordination;
+- criteria for splitting or stopping a PR;
+- rules limiting unnecessary human intervention.
 
-WebeeBlocks may report requirements, constraints, failures, or candidate questions back to PolaCore, but those reports are inputs to experiments, not evidence that a proposed mechanism is valid.
+These mechanisms are evaluated **because they are exercised on real PolaCore work**, not because they look elegant in documentation.
 
-No experimental PolaCore result is automatically authorized for WebeeBlocks.
+## No cross-project communication
 
-## Validation classes
+PolaCore must not:
 
-Use the evidence vocabulary from `AGENTS.md`. For cross-project promotion, a candidate must have:
+- receive requirements or tasks from another project as part of its normal workflow;
+- send issues, PRs, artifacts, code, test results, or decisions to another project;
+- maintain promotion records for another project;
+- depend on another repository's state;
+- coordinate agents across repository boundaries;
+- treat another project as a consumer of PolaCore results.
 
-1. an explicit claim and scope;
-2. reproducible evidence appropriate to the claim;
-3. independent Verification/Reviewer scrutiny;
-4. Adversary scrutiny when the claim concerns security, trust boundaries, races, authority, hostile input, isolation, or other high-cost failure modes;
-5. no unresolved blocking contradiction;
-6. remaining uncertainty stated explicitly;
-7. a retained artifact, test, document, or implementation that another project can inspect.
+Any later reuse of an organizational idea elsewhere is an external human decision made after observing PolaCore. It is not a PolaCore workflow and must not create coupling between repositories.
 
-A candidate is **PROMOTABLE** only when the Lead records that the evidence supports reuse within a stated scope. `INFERENCE`, `HYPOTHESIS`, `UNPROVEN`, `REFUTED`, misleading SKIP, or merely green CI are never promotable.
+## How an organizational mechanism is considered validated
 
-## Promotion record
+A mechanism is considered organizationally validated only after enough real use to judge its effects. The Lead should record, when useful:
 
-Every reusable result intended for another project must have a promotion record containing:
+1. the organizational problem being addressed;
+2. the mechanism tried;
+3. where it was exercised in PolaCore;
+4. observed benefits and costs;
+5. failure modes or unintended effects;
+6. how much human intervention it required;
+7. whether it improved or degraded evidence quality;
+8. whether the mechanism should be kept, modified, or rejected.
 
-- candidate/pattern name;
-- originating issue/PR and exact validated commit or retained artifact;
-- claim being promoted;
-- evidence classification;
-- tests/review/adversarial evidence;
-- assumptions and environmental limits;
-- known counterexamples or rejected alternatives;
-- permitted reuse scope;
-- explicit remaining uncertainty;
-- Lead decision: `PROMOTABLE` or `NOT_PROMOTABLE`.
-
-Promotion records should live under `docs/governance/promotions/` when they become necessary. Do not create speculative records for ideas that have not reached validation.
+A single successful PR is evidence, not necessarily validation. A mechanism that creates ceremony without information gain should be simplified or removed.
 
 ## Adaptive agent pipeline
 
@@ -56,7 +61,7 @@ The Lead selects the smallest process that can produce trustworthy evidence.
 ### Normal
 `Lead -> Builder -> Verification`
 
-Use for bounded low-risk work whose mechanism is already validated.
+Use for bounded low-risk work whose causal structure is understood.
 
 ### Experimental
 `Lead -> Experimenter -> Builder -> Verification`
@@ -68,7 +73,7 @@ Use when behavior, architecture, measurement, or causality is uncertain.
 
 Use for security invariants, trust boundaries, authority, confinement, races, hostile input, persistence, or similarly costly false claims.
 
-Roles are epistemic functions, not ceremony. A role may be skipped only when its information value is genuinely unnecessary.
+Roles are epistemic functions, not ceremony. A role should exist only when it produces useful independent information.
 
 ## Independence
 
@@ -76,10 +81,14 @@ Whenever practical, the agent/model that verifies or attacks a claim should be i
 
 ## GitHub as shared memory
 
-Experiments, contradictions, decisions, promotion records, and remaining uncertainty must be written to GitHub. Chat history is not authoritative project state.
+Experiments, contradictions, decisions, organizational lessons, and remaining uncertainty must be written to GitHub when they are important to future PolaCore work. Chat history is not authoritative project state.
 
-## Relationship with WebeeBlocks
+## Human-intervention objective
 
-PolaCore validates reusable engineering doctrine and mechanisms. WebeeBlocks integrates only the subset that has crossed the promotion gate and is relevant to its product needs.
+The organization should progressively reduce the need for Emmanuel to relay messages mechanically between agents. Human intervention should concentrate on genuine decisions: objectives, product/security trade-offs, authorization boundaries, and ambiguous strategic choices.
 
-PolaCore must not dictate WebeeBlocks product requirements, pedagogy, UX, or domain behavior. Those remain WebeeBlocks concerns. The laboratory validates *how* we engineer and prove mechanisms; the product decides *what* it needs.
+Automation is successful only if it preserves or improves evidence quality while reducing coordination burden.
+
+## Evaluation principle
+
+PolaCore is the place where new organizational mechanisms are **tried before they are trusted**. The result of that experimentation is knowledge about how to organize AI-assisted engineering. What anyone later chooses to reproduce elsewhere is outside PolaCore and must remain technically and operationally independent.
