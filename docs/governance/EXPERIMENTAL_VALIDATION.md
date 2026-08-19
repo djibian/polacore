@@ -91,4 +91,4 @@ Automation is successful only if it preserves or improves evidence quality while
 
 ## Evaluation principle
 
-PolaCore is the place where new organizational mechanisms are **tried before they are trusted**. The result of that experimentation is knowledge about how to organize AI-assisted engineering. What anyone later chooses to reproduce elsewhere is outside PolaCore and must remain technically and operationally independent.
+PolaCore is the place where new organizational mechanisms are **tried before they are trusted**. The result of that experimentation is knowledge about how to organize AI-assisted engineering. Reuse of those organizational lessons elsewhere, if any, happens outside PolaCore and without technical or operational coupling.
