@@ -33,3 +33,5 @@ jobs:
         run: python3 tests/evil/bundle_toctou_binding.py
       - name: Probe fd-bound detached mount semantics when permitted
         run: python3 tests/evil/mount_fd_binding_probe.py
+      - name: Exercise narrow P117 source acquisition
+        run: bash tests/evil/run_source_acquisition.sh
