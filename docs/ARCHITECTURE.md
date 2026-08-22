@@ -62,6 +62,18 @@ A rich-text engine may be embedded for text editing, but it remains replaceable.
 
 The editor should expose direct visual composition while preserving structural and semantic constraints. Page-builder-style unrestricted presentation nesting is not an architectural goal.
 
+### Site Design authority boundary
+
+Whole-site presentation is represented by a PolaStudio-owned declarative **Site Design** model rather than a WordPress-style executable theme package.
+
+Site Design data may reference approved components and assets and may control design tokens, templates, component variants, navigation/header/footer presentation, document/commerce presentation and responsive rules. It does not thereby acquire database, filesystem, network, secret, administrator, publication or server-execution authority.
+
+If a design requires executable functional behavior, that behavior must cross a separate component/extension boundary and receive its own explicit capabilities. A Site Design cannot widen the authority of a referenced component merely by configuring or embedding it.
+
+Design imports must remain data imports. Any executable or privileged behavior discovered during WordPress theme migration must be classified separately rather than being smuggled into the Site Design representation.
+
+The exact Site Design schema, CSS/styling escape hatch, client-side interaction boundary and asset model require later experiments and review.
+
 ### PolaCommerce
 
 PolaCommerce is an official first-party module and essential product scope, but it is not part of the minimal kernel. This boundary lets non-commerce installations avoid unnecessary commerce code and lets commerce-specific authority be modeled explicitly.
