@@ -13,14 +13,14 @@ Expected major trust domains:
 - **Authority Core**: trusted authorization and high-value state transitions.
 - **Broker / Storage services**: mediate explicitly authorized persistence and privileged operations.
 - **Launch / confinement substrate**: creates restricted worker execution contexts from a narrow, versioned policy.
-- **Third-party worker**: untrusted execution domain; only explicitly granted authority is available.
+- **Third-party worker**: untrusted execution domain; arbitrary code execution is assumed possible.
 - **Administrative surface**: trusted control plane; must not inherit authority from third-party content or code.
 
 ## Core architectural constraints
 
 - No ambient authority for third-party workers.
 - Component authority is explicit, narrow, revocable, and operation-scoped where practical.
-- Worker failure or compromise must not imply Authority Core compromise.
+- Worker compromise must not imply Authority Core compromise.
 - Persistent authority must not depend solely on ephemeral UID/GID identity.
 - Runtime confinement claims require inspection of effective runtime state, not just configuration text.
 - Trusted executable artifacts must be bound to approved content/closure semantics and protected against substitution between validation and launch.
