@@ -22,5 +22,6 @@ Do not create an ADR for every experiment. Failed hypotheses and temporary inves
 - [ADR-0001 — Native structured editor and PolaCore-owned document model](ADR-0001-native-structured-editor.md)
 - [ADR-0002 — PolaCommerce is a first-party module outside the minimal kernel](ADR-0002-polacommerce-first-party-module.md)
 - [ADR-0003 — Capability-based secure extension model](ADR-0003-capability-based-extension-model.md)
+- [ADR-0004 — Declarative Site Design replaces executable theme authority](ADR-0004-declarative-site-design.md)
 
 These ADRs define durable product boundaries. They do not select implementation mechanisms that still require experiments and evidence.

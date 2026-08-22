@@ -59,6 +59,34 @@ Examples include mapping SEO metadata to native SEO capabilities, form plugins t
 
 Unknown or custom plugins should be analyzed and reported rather than silently imported as executable components. Direct execution of WordPress plugins or themes inside PolaCore is a non-goal.
 
+## Native-versus-extension inclusion rule
+
+PolaCore should not use an extension merely because WordPress historically required a plugin for the same function.
+
+A broadly useful capability that materially defines a complete CMS, authoring/design environment, or commerce platform should preferentially be implemented as a first-party capability in the appropriate product layer. Provider-specific, organization-specific, domain-specific, unusually specialized, or externally coupled behavior should preferentially remain a Secure Extension.
+
+This rule must not be used to enlarge the minimal trusted kernel indiscriminately. First-party capabilities may live in PolaStudio, PolaCommerce, brokered services, or other modules outside the kernel.
+
+Real use cases should be decomposed into reusable primitives. When a custom plugin exposes a missing generic primitive, that primitive should be considered for the first-party platform while genuinely domain-specific policy remains in the extension.
+
+## Whole-site design direction
+
+PolaStudio is the whole-site design environment, not only the page editor.
+
+PolaCore will not reproduce WordPress-style executable themes as a privileged application unit. Whole-site presentation is represented by a declarative, versioned **Site Design** model owned by PolaStudio.
+
+A Site Design covers design tokens, typography, visual rules, reusable component variants, templates, navigation/header/footer presentation, document and commerce presentation, assets/references, and responsive rules. It is visually editable, exportable/importable, duplicable and versionable.
+
+Presentation authority does not imply database, filesystem, network, secret, administrator, publication or server-execution authority. Functional behavior that cannot be represented declaratively belongs to a constrained first-party component or Secure Extension with explicit capabilities.
+
+The word `theme` may remain useful in migration or user-facing language, but it does not describe a privileged executable package in the PolaCore architecture.
+
+## Real-world product requirements
+
+`docs/PRODUCT_REQUIREMENTS.md` records a traceable first requirements batch derived from actual WordPress/WooCommerce usage. It maps recurring plugin/theme needs into PolaCore, PolaStudio, PolaCommerce and Secure Extensions, including structured content modeling, product options, unit-aware pricing, reorder, shipping zones, commercial documents, data portability, observability, navigation design, pedagogical custom behavior and custom theme migration.
+
+These requirements are coverage targets and classification constraints. They are not evidence that the mechanisms have been implemented or validated.
+
 ## Current phase
 
 The project is in architecture, adversarial review, and engineering-prototype phases. Security properties must be demonstrated before they are treated as platform guarantees.
