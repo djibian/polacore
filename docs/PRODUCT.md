@@ -4,7 +4,7 @@
 
 PolaCore is an experimental secure CMS and component platform designed around least authority, strong isolation, explicit capabilities, and verifiable security invariants.
 
-The project is not a WordPress hardening fork. WordPress may be used as a migration source, compatibility reference, or benchmark, but it is not the authority model for PolaCore.
+The project is not a WordPress hardening fork. WordPress may be used as a migration appliance, compatibility source, or adversarial benchmark, but it is not the authority model for PolaCore.
 
 ## Product direction
 
@@ -21,7 +21,7 @@ A strategic fifth capability is the **WordPress/WooCommerce migration system**, 
 
 ## Core product promise
 
-A third-party component must remain constrained to the authority explicitly granted to it. Installing a component must not implicitly grant access to CMS administration, publication, secrets, unrelated components, storage, or network resources.
+A third-party component may be fully compromised without thereby obtaining authority over the CMS core, administrators, publication, secrets, unrelated components, ambient storage, arbitrary network access, or durable persistence.
 
 ## Native authoring direction
 
@@ -70,16 +70,19 @@ The product architecture above is a durable direction, not authorization to buil
 1. Establish a small, explicit trusted computing base.
 2. Demonstrate isolation and authority boundaries with reproducible tests.
 3. Prefer simple mechanisms whose effective behavior can be inspected.
-4. Build a component execution model that preserves explicit authority boundaries.
-5. Define stable structured-content, authoring, commerce, extension, and migration contracts on top of the demonstrated security substrate.
-6. Progressively implement PolaCore Studio, PolaCommerce, migration tooling, and the secure extension ecosystem.
+4. Build a component execution model that remains safe under arbitrary component code execution.
+5. Only after the security substrate is credible, build authoring, content, administration, migration, and ecosystem features on top of it.
+6. Define stable structured-content, commerce, and extension contracts on top of the demonstrated security substrate.
+7. Progressively implement PolaCore Studio, PolaCommerce, migration tooling, and the secure extension ecosystem.
 
 ## Non-goals for the current phase
 
+- broad plugin compatibility;
+- feature parity with WordPress;
+- premature UI development;
 - WordPress plugin or theme code compatibility;
 - implicit broad authority for third-party extensions;
 - page-builder compatibility as a design constraint;
-- feature parity with every WordPress plugin;
-- premature UI or commerce implementation;
+- premature commerce implementation;
 - speculative multi-backend abstractions without a demonstrated need;
 - security claims based only on configuration or documentation.
