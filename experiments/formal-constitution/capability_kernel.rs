@@ -27,6 +27,8 @@ pub struct KernelState {
 }
 
 impl KernelState {
+    // Public callers may name this predicate but cannot unfold it outside the
+    // module. The authority-bearing representation remains opaque.
     pub closed spec fn request_authorized(&self, req: &Request) -> bool {
         self.constitution_allows
             && self.site_policy_allows
@@ -79,19 +81,10 @@ impl KernelState {
 
     // UNTRUSTED_BOUNDARY_V1: no verifier-only caller precondition is allowed.
     // The hostile caller supplies only Request. Constitutional policy, site
-    // policy, issued grant data and revocation epoch come from private state.
+    // policy, issued grant data and revocation epoch come from opaque private state.
     pub fn authorize_request(&self, req: &Request) -> (allowed: bool)
         ensures
             allowed == self.request_authorized(req),
-            allowed ==> self.constitution_allows,
-            allowed ==> self.site_policy_allows,
-            allowed ==> self.grant_present,
-            allowed ==> self.current_epoch > 0,
-            allowed ==> self.grant_epoch == self.current_epoch,
-            allowed ==> req.capability_id == self.grant_id,
-            allowed ==> req.caller == self.grant_subject,
-            allowed ==> req.resource == self.grant_resource,
-            allowed ==> req.action == self.grant_action,
     {
         self.constitution_allows
             && self.site_policy_allows
@@ -105,6 +98,9 @@ impl KernelState {
     }
 }
 
+// The following internal theorems connect the opaque public authorization
+// predicate to the constitutional properties. They may inspect private state;
+// untrusted callers cannot manufacture those state facts through Request.
 proof fn constitutional_denial_cannot_be_amplified(state: KernelState, req: Request)
     requires
         !state.constitution_allows,
