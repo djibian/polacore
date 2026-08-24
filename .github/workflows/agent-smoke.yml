@@ -36,12 +36,15 @@ jobs:
       OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true'
       OPENCODE_DISABLE_LSP_DOWNLOAD: 'true'
       OPENCODE_DISABLE_CLAUDE_CODE: 'true'
+      OPENCODE_DISABLE_MODELS_FETCH: 'true'
     steps:
       - name: Checkout PolaCore
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
 
@@ -52,15 +55,6 @@ jobs:
             echo 'ALBERT_API_KEY repository secret is missing.' >&2
             exit 1
           fi
-
-      - name: List authorized Albert model IDs
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${ALBERT_API_KEY}" \
-            https://albert.api.etalab.gouv.fr/v1/models \
-            | python3 -c 'import json,sys; payload=json.load(sys.stdin); ids=sorted(str(x.get("id")) for x in payload.get("data",[]) if x.get("id")); print("Authorized Albert model IDs:"); print("\n".join(ids))'
 
       - name: Install pinned OpenCode
         run: npm install --global opencode-ai@1.18.21
