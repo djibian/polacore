@@ -8,6 +8,13 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 SOURCES = sorted(ROOT.glob("*.rs"))
 
+# These names are part of the experiment contract. The scanner deliberately
+# binds to them instead of trusting movable comments/markers.
+BOUNDARIES = {
+    "constitution.rs": ("authorize", "mediate_admin_transition"),
+    "capability_kernel.rs": ("authorize_request",),
+}
+
 forbidden = {
     r"\bassume\s*\(": "assume(...) shortcut",
     r"\badmit\s*\(": "admit(...) shortcut",
@@ -18,7 +25,10 @@ forbidden = {
 }
 
 failed = False
-boundary_count = 0
+
+if not SOURCES:
+    print("REFUTED hygiene: no Verus experiment sources found", file=sys.stderr)
+    sys.exit(1)
 
 for source in SOURCES:
     text = source.read_text(encoding="utf-8")
@@ -30,43 +40,48 @@ for source in SOURCES:
             print(f"REFUTED hygiene: {description} at {source}:{line}", file=sys.stderr)
             failed = True
 
-    # Any marker whose name begins with UNTRUSTED_BOUNDARY is a public hostile
-    # call boundary. It must not rely on a Verus-only caller precondition.
-    for match in re.finditer(r"UNTRUSTED_BOUNDARY(?:_[A-Z0-9]+)?", text):
-        boundary_count += 1
-        fn_pos = text.find("fn ", match.end())
-        body_pos = text.find("{", fn_pos)
-        if fn_pos == -1 or body_pos == -1:
+for filename, function_names in BOUNDARIES.items():
+    source = ROOT / filename
+    if not source.exists():
+        print(f"REFUTED hygiene: required boundary source missing: {source}", file=sys.stderr)
+        failed = True
+        continue
+
+    text = source.read_text(encoding="utf-8")
+    for name in function_names:
+        pattern = re.compile(rf"\bfn\s+{re.escape(name)}\s*\(")
+        matches = list(pattern.finditer(text))
+        if len(matches) != 1:
             print(
-                f"REFUTED hygiene: boundary marker in {source} has no following function",
+                f"REFUTED hygiene: expected exactly one function named {name} in {source}; "
+                f"found {len(matches)}",
                 file=sys.stderr,
             )
             failed = True
             continue
-        signature = text[fn_pos:body_pos]
+
+        match = matches[0]
+        body_pos = text.find("{", match.end())
+        if body_pos == -1:
+            print(f"REFUTED hygiene: function {name} has no body in {source}", file=sys.stderr)
+            failed = True
+            continue
+
+        signature = text[match.start():body_pos]
         if re.search(r"\brequires\b", signature):
-            line = text.count("\n", 0, fn_pos) + 1
+            line = text.count("\n", 0, match.start()) + 1
             print(
-                f"REFUTED hygiene: hostile boundary trusts caller preconditions at {source}:{line}",
+                f"REFUTED hygiene: hostile boundary {name} trusts caller preconditions "
+                f"at {source}:{line}",
                 file=sys.stderr,
             )
             failed = True
 
-if not SOURCES:
-    print("REFUTED hygiene: no Verus experiment sources found", file=sys.stderr)
-    failed = True
-
-if boundary_count < 3:
-    print(
-        f"REFUTED hygiene: expected at least three hostile-boundary markers; found {boundary_count}",
-        file=sys.stderr,
-    )
-    failed = True
-
 if failed:
     sys.exit(1)
 
+checked = sum(len(names) for names in BOUNDARIES.values())
 print(
     f"VERIFIED_BY_CI proof-hygiene guard: scanned {len(SOURCES)} source(s), "
-    f"{boundary_count} hostile boundary/boundaries, no selected proof shortcuts"
+    f"checked {checked} named hostile boundaries, no selected proof shortcuts"
 )
