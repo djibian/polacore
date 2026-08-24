@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/agent-router.yml'
       - '.github/workflows/agent-router-contract.yml'
+      - '.github/workflows/agent-builder-canary.yml'
       - '.opencode/agents/router.md'
       - 'scripts/agent_router_validate.py'
 
@@ -34,16 +35,26 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Parse operational workflow YAML and chain wiring
+      - name: Parse operational workflow YAML and reusable chain wiring
         shell: bash
         run: |
           set -euo pipefail
-          ruby -e "require 'psych'; Psych.parse_file(ARGV[0])" .github/workflows/agent-router.yml
-          grep -Fx '      actions: write' .github/workflows/agent-router.yml >/dev/null
-          grep -F 'gh workflow run agent-builder-canary.yml' .github/workflows/agent-router.yml >/dev/null
-          grep -F -- "-f source='router-normal-v1'" .github/workflows/agent-router.yml >/dev/null
-          grep -F "if [ \"\$classification\" != 'NORMAL' ]" .github/workflows/agent-router.yml >/dev/null
-          echo 'Operational Router workflow parses and retains deterministic NORMAL-only Builder dispatch.'
+          ruby -e "require 'psych'; Psych.parse_file(ARGV[0]); Psych.parse_file(ARGV[1])" \
+            .github/workflows/agent-router.yml \
+            .github/workflows/agent-builder-canary.yml
+          if grep -F 'actions: write' .github/workflows/agent-router.yml >/dev/null; then
+            echo 'Router must not need Actions write permission in workflow_call design' >&2
+            exit 1
+          fi
+          if grep -F 'gh workflow run' .github/workflows/agent-router.yml >/dev/null; then
+            echo 'Router must not dispatch Builder through workflow_dispatch in v2' >&2
+            exit 1
+          fi
+          grep -F "if: needs.apply-state.outputs.classification == 'NORMAL'" .github/workflows/agent-router.yml >/dev/null
+          grep -F 'uses: ./.github/workflows/agent-builder-canary.yml' .github/workflows/agent-router.yml >/dev/null
+          grep -F 'source: router-normal-v2' .github/workflows/agent-router.yml >/dev/null
+          grep -F 'ALBERT_API_KEY:' .github/workflows/agent-router.yml >/dev/null
+          echo 'Operational Router parses and retains NORMAL-only reusable Builder invocation without actions:write.'
 
       - name: Verify runner Node.js toolchain
         shell: bash
