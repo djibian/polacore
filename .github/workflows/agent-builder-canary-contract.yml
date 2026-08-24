@@ -54,13 +54,15 @@ jobs:
           # Builder input boundary
 
           ## Authorized canary task
-          GitHub Actions authorizes exactly one edit: replace the final status line in `docs/automation/BUILDER_CANARY.md` so that the complete file becomes exactly:
+          GitHub Actions authorizes exactly one edit: make `docs/automation/BUILDER_CANARY.md` equal to the bytes strictly between the following markers. The marker lines themselves are not file content.
 
+          BEGIN_FILE_CONTENT
           # Builder canary
 
           This file is reserved for proving bounded autonomous Builder behavior in GitHub Actions.
 
           Canary status: CONTRACT_OK
+          END_FILE_CONTENT
 
           No other repository change is authorized.
 
