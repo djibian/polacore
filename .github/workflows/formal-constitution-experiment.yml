@@ -28,6 +28,7 @@ jobs:
     timeout-minutes: 10
     env:
       VERUS_VERSION: '0.2026.08.15.7d4628a'
+      VERUS_ZIP_SHA256: '0467d3dd832e29d301abdd83d60237f0299d0a0acba3041388af066c8b31d1e4'
       VERUS_RUST_TOOLCHAIN: '1.97.1-x86_64-unknown-linux-gnu'
       TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -48,14 +49,16 @@ jobs:
       - name: Reject proof shortcuts and caller preconditions
         run: python3 experiments/formal-constitution/check_proof_hygiene.py
 
-      - name: Download pinned Verus release and record digest
+      - name: Download and verify pinned Verus release
         shell: bash
         run: |
           set -euo pipefail
           url="https://github.com/verus-lang/verus/releases/download/release%2F${VERUS_VERSION}/verus-${VERUS_VERSION}-x86-linux.zip"
           curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
             --retry 3 --output /tmp/verus.zip "$url"
-          sha256sum /tmp/verus.zip
+          actual="$(sha256sum /tmp/verus.zip | awk '{print $1}')"
+          printf 'expected_verus_sha256=%s\nactual_verus_sha256=%s\n' "$VERUS_ZIP_SHA256" "$actual"
+          test "$actual" = "$VERUS_ZIP_SHA256"
           unzip -q /tmp/verus.zip -d /tmp
           test -x /tmp/verus-x86-linux/verus
 
