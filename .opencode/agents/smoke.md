@@ -1,7 +1,7 @@
 ---
 description: Read-only CI smoke agent proving OpenCode can use Albert against PolaCore
 mode: primary
-model: albert/DeepSeek-V4-Flash
+model: albert/deepseek-ai/DeepSeek-V4-Flash
 temperature: 0.1
 permission:
   read: allow
