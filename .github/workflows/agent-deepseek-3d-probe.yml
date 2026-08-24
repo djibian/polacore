@@ -1,8 +1,9 @@
 name: PolaCore DeepSeek 3D Probe
 
 on:
-  push:
-    branches: [infra/agent-real-task-v1]
+  pull_request:
+    branches: [engineering]
+    types: [synchronize]
     paths:
       - '.github/workflows/agent-deepseek-3d-probe.yml'
 
@@ -11,6 +12,7 @@ permissions:
 
 jobs:
   build:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor == github.repository_owner
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
