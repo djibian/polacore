@@ -204,15 +204,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      actions: write
       contents: read
       issues: write
+    outputs:
+      classification: ${{ steps.transition.outputs.classification }}
     env:
       GH_TOKEN: ${{ github.token }}
       ISSUE_NUMBER: ${{ needs.route-analysis.outputs.issue_number }}
       DECISION_B64: ${{ needs.route-analysis.outputs.decision_b64 }}
     steps:
       - name: Decode and re-check controlled transition
+        id: transition
         shell: bash
         run: |
           set -euo pipefail
@@ -240,6 +242,8 @@ jobs:
           if not isinstance(d.get('rationale'), str) or not 20 <= len(d['rationale']) <= 800:
               raise SystemExit('invalid rationale in handoff')
           PY
+          classification="$(python3 -c "import json; print(json.load(open('/tmp/router-decision.json'))['classification'])")"
+          echo "classification=$classification" >> "$GITHUB_OUTPUT"
 
       - name: Ensure controlled routing labels exist
         shell: bash
@@ -299,27 +303,40 @@ jobs:
           PY
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/router-comment.md
 
-      - name: Dispatch bounded Builder for validated NORMAL
+  builder:
+    needs: [route-analysis, apply-state]
+    if: needs.apply-state.outputs.classification == 'NORMAL'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/agent-builder-canary.yml
+    with:
+      issue_number: ${{ needs.route-analysis.outputs.issue_number }}
+      source: router-normal-v2
+    secrets:
+      ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+
+  record-chain:
+    needs: [route-analysis, apply-state, builder]
+    if: needs.builder.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_NUMBER: ${{ needs.route-analysis.outputs.issue_number }}
+    steps:
+      - name: Record successful Router to Builder chain
         shell: bash
         run: |
           set -euo pipefail
-          classification="$(python3 -c "import json; print(json.load(open('/tmp/router-decision.json'))['classification'])")"
-          if [ "$classification" != 'NORMAL' ]; then
-            echo "No Builder dispatch for classification $classification."
-            exit 0
-          fi
+          cat > /tmp/chain-comment.md <<'EOF'
+          ### PolaCore autonomous chain v2
 
-          gh workflow run agent-builder-canary.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref engineering \
-            -f issue_number="$ISSUE_NUMBER" \
-            -f source='router-normal-v1'
+          `VERIFIED_BY_CI` — after a validated `NORMAL` Router decision, GitHub invoked the bounded Builder as a reusable workflow via `workflow_call`, and the called Builder workflow completed successfully.
 
-          cat > /tmp/builder-dispatch-comment.md <<'EOF'
-          ### PolaCore autonomous chain
-
-          `VERIFIED_BY_CI` — deterministic Router state application dispatched the bounded Builder canary through `workflow_dispatch` after a validated `NORMAL` classification.
-
-          This is a process transition, not proof that the Builder output is correct. The Builder must still pass its own independent validation and publication gates.
+          The Builder still applied its own independent issue-state, path-scope, exact-content, clean-checkout, and publication gates. No merge is automatic.
           EOF
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/builder-dispatch-comment.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/chain-comment.md
