@@ -1,0 +1,44 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "enabled_providers": ["albert"],
+  "model": "albert/qwen3-coder-30b-A3b-instruct",
+  "small_model": "albert/deepseek-v4-flash",
+  "provider": {
+    "albert": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Albert API",
+      "options": {
+        "baseURL": "https://albert.api.etalab.gouv.fr/v1",
+        "apiKey": "{env:ALBERT_API_KEY}"
+      },
+      "models": {
+        "qwen3-coder-30b-A3b-instruct": {
+          "name": "Qwen3 Coder 30B A3B Instruct"
+        },
+        "deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash"
+        },
+        "openai/gpt-oss-120b": {
+          "name": "GPT OSS 120B"
+        }
+      }
+    }
+  },
+  "permission": {
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "edit": "deny",
+    "bash": "deny",
+    "task": "deny",
+    "skill": "deny",
+    "lsp": "deny",
+    "webfetch": "deny",
+    "websearch": "deny",
+    "external_directory": "deny",
+    "question": "deny",
+    "todowrite": "deny",
+    "doom_loop": "deny"
+  }
+}

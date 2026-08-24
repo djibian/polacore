@@ -1,0 +1,77 @@
+name: Agent Smoke - Albert + OpenCode
+
+on:
+  push:
+    branches:
+      - infra/albert-opencode-smoke
+    paths:
+      - 'opencode.json'
+      - '.opencode/agents/smoke.md'
+      - '.github/workflows/agent-smoke.yml'
+  pull_request:
+    branches:
+      - engineering
+    paths:
+      - 'opencode.json'
+      - '.opencode/agents/smoke.md'
+      - '.github/workflows/agent-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+      OPENCODE_AUTO_SHARE: 'false'
+      OPENCODE_DISABLE_AUTOUPDATE: 'true'
+      OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true'
+      OPENCODE_DISABLE_LSP_DOWNLOAD: 'true'
+      OPENCODE_DISABLE_CLAUDE_CODE: 'true'
+      OPENCODE_DISABLE_MODELS_FETCH: 'true'
+    steps:
+      - name: Checkout PolaCore
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Require Albert secret
+        shell: bash
+        run: |
+          if [ -z "${ALBERT_API_KEY:-}" ]; then
+            echo 'ALBERT_API_KEY repository secret is missing.' >&2
+            exit 1
+          fi
+
+      - name: Install pinned OpenCode
+        run: npm install --global opencode-ai@1.18.21
+
+      - name: Record OpenCode version
+        run: opencode --version
+
+      - name: Run read-only Albert smoke agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          opencode run \
+            --agent smoke \
+            --model albert/qwen3-coder-30b-A3b-instruct \
+            --format json \
+            "Perform the PolaCore infrastructure smoke check exactly as defined by your agent instructions." \
+            | tee /tmp/polacore-agent-smoke.jsonl
+
+          grep -F 'POLACORE_ALBERT_OPENCODE_SMOKE_OK' /tmp/polacore-agent-smoke.jsonl >/dev/null
+          echo 'Smoke marker verified.'
