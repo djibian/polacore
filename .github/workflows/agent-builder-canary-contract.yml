@@ -33,16 +33,21 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Parse operational workflow YAML and chain guard
+      - name: Parse operational workflow YAML and reusable-call guard
         shell: bash
         run: |
           set -euo pipefail
           ruby -e "require 'psych'; Psych.parse_file(ARGV[0])" .github/workflows/agent-builder-canary.yml
           grep -Fx '  workflow_dispatch:' .github/workflows/agent-builder-canary.yml >/dev/null
-          grep -F "github.actor == 'github-actions[bot]'" .github/workflows/agent-builder-canary.yml >/dev/null
-          grep -F "github.event.inputs.source == 'router-normal-v1'" .github/workflows/agent-builder-canary.yml >/dev/null
-          grep -Fx '      source:' .github/workflows/agent-builder-canary.yml >/dev/null
-          echo 'Operational Builder workflow parses and retains guarded Router dispatch authorization.'
+          grep -Fx '  workflow_call:' .github/workflows/agent-builder-canary.yml >/dev/null
+          grep -F "inputs.source == 'router-normal-v2'" .github/workflows/agent-builder-canary.yml >/dev/null
+          grep -F 'github.actor == github.repository_owner' .github/workflows/agent-builder-canary.yml >/dev/null
+          grep -F 'ALBERT_API_KEY:' .github/workflows/agent-builder-canary.yml >/dev/null
+          if grep -F "github.actor == 'github-actions[bot]'" .github/workflows/agent-builder-canary.yml >/dev/null; then
+            echo 'Reusable Builder must not depend on dispatch bot identity' >&2
+            exit 1
+          fi
+          echo 'Operational Builder parses and retains workflow_call + owner/source authorization.'
 
       - name: Verify runner Node.js toolchain
         shell: bash

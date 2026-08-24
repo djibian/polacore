@@ -1,14 +1,6 @@
 name: PolaCore Builder Canary
 
 on:
-  push:
-    branches: [engineering]
-    paths:
-      - '.github/workflows/agent-builder-canary.yml'
-      - '.opencode/agents/builder-canary.md'
-      - 'docs/automation/BUILDER_CANARY.md'
-  issues:
-    types: [labeled]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -16,47 +8,36 @@ on:
         required: true
         type: string
       source:
-        description: 'Trusted dispatch source; owner manual runs may leave the default'
+        description: 'Trusted invocation source'
         required: false
         default: 'manual'
         type: string
+  workflow_call:
+    inputs:
+      issue_number:
+        description: 'NORMAL issue number authorized by the Router'
+        required: true
+        type: string
+      source:
+        description: 'Trusted caller contract marker'
+        required: true
+        type: string
+    secrets:
+      ALBERT_API_KEY:
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: agent-builder-canary-${{ github.event.issue.number || github.event.inputs.issue_number || github.ref }}
+  group: agent-builder-canary-${{ inputs.issue_number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  bootstrap-label:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - name: Ensure owner-controlled canary label exists
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh label create 'agent:build-canary' \
-            --repo "$GITHUB_REPOSITORY" \
-            --color '1D76DB' \
-            --description 'Owner-authorized bounded Builder canary execution' \
-            --force
-
   build-patch:
     if: >-
-      (github.event_name == 'workflow_dispatch' &&
-       (github.actor == github.repository_owner ||
-        (github.actor == 'github-actions[bot]' && github.event.inputs.source == 'router-normal-v1'))) ||
-      (github.event_name == 'issues' &&
-       github.event.action == 'labeled' &&
-       github.event.label.name == 'agent:build-canary' &&
-       github.actor == github.repository_owner)
+      (github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner) ||
+      (inputs.source == 'router-normal-v2' && github.actor == github.repository_owner)
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     permissions:
@@ -90,15 +71,11 @@ jobs:
       - name: Resolve issue number
         id: issue
         env:
-          DISPATCH_ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+          INPUT_ISSUE_NUMBER: ${{ inputs.issue_number }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = 'issues' ]; then
-            number="$(python3 -c 'import json,os; print(json.load(open(os.environ["GITHUB_EVENT_PATH"]))["issue"]["number"])')"
-          else
-            number="${DISPATCH_ISSUE_NUMBER:-}"
-          fi
+          number="${INPUT_ISSUE_NUMBER:-}"
           [[ "$number" =~ ^[1-9][0-9]*$ ]] || { echo 'invalid issue number' >&2; exit 1; }
           echo "number=$number" >> "$GITHUB_OUTPUT"
 
@@ -117,7 +94,7 @@ jobs:
           if issue.get('state') != 'open':
               raise SystemExit('Builder canary requires an open issue')
           if ((issue.get('user') or {}).get('login')) != owner:
-              raise SystemExit('Builder canary v1 requires an owner-authored issue')
+              raise SystemExit('Builder canary v2 requires an owner-authored issue')
           labels={x.get('name') for x in issue.get('labels', [])}
           required={'agent:ready-for-build','risk:normal'}
           if not required <= labels:
@@ -129,7 +106,6 @@ jobs:
       - name: Build trusted canary control and bounded untrusted context
         env:
           ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
-          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -319,7 +295,3 @@ jobs:
           '''), encoding='utf-8')
           PY
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/issue-comment.md
-          current="$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')"
-          if grep -Fxq 'agent:build-canary' <<< "$current"; then
-            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label 'agent:build-canary'
-          fi
