@@ -9,10 +9,11 @@ permissions:
   contents: read
 
 jobs:
-  record-routing-failure:
+  record-task-failure:
     if: >-
       github.event.workflow_run.event == 'issues' &&
-      github.event.workflow_run.conclusion != 'success'
+      (github.event.workflow_run.conclusion == 'failure' ||
+       github.event.workflow_run.conclusion == 'timed_out')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -25,7 +26,7 @@ jobs:
       FAILED_RUN_URL: ${{ github.event.workflow_run.html_url }}
       FAILED_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
     steps:
-      - name: Persist fail-closed task state only for an armed open pilot
+      - name: Persist fail-closed state for an active open pilot
         shell: bash
         run: |
           set -euo pipefail
@@ -36,16 +37,18 @@ jobs:
           labels={x['name'] for x in issue.get('labels',[])}
           if issue.get('state') != 'OPEN':
               raise SystemExit('pilot issue is not open')
-          if 'agent:route-3d' not in labels:
-              raise SystemExit('pilot is not armed')
+          armed = 'agent:route-3d' in labels
+          routed_normal = {'agent:ready-for-build','risk:normal'} <= labels
+          if not (armed or routed_normal):
+              raise SystemExit('pilot is not in an active pre-human state')
           PY
           then
-            echo 'Failure run is not tied to an armed open #36; no state change.'
+            echo 'Failure run is not tied to an active open #36; no state change.'
             exit 0
           fi
 
           ensure_label() { gh label create "$1" --repo "$GITHUB_REPOSITORY" --color "$2" --description "$3" --force; }
-          ensure_label 'agent:blocked' 'B60205' 'Router cannot select a trustworthy next step'
+          ensure_label 'agent:blocked' 'B60205' 'Autonomous task failed before a trustworthy human-ready state'
           ensure_label 'risk:unknown' 'D4C5F9' 'Risk cannot yet be classified reliably'
 
           current="$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')"
@@ -62,4 +65,4 @@ jobs:
           - State: \`agent:blocked\`
           - Risk: \`risk:unknown\`
 
-          \`UNPROVEN\` — the autonomous chain failed before establishing a trustworthy next state. No Builder result is accepted from this run."
+          \`UNPROVEN\` — the autonomous chain failed before establishing a trustworthy human-ready state. No Builder result from this run is accepted for publication or merge."
