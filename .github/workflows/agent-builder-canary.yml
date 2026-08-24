@@ -140,9 +140,11 @@ jobs:
           context=f'''# Builder input boundary
 
           ## Authorized canary task
-          GitHub Actions authorizes exactly one edit: make `docs/automation/BUILDER_CANARY.md` equal to the following complete content:
+          GitHub Actions authorizes exactly one edit: make `docs/automation/BUILDER_CANARY.md` equal to the bytes strictly between the following markers. The marker lines themselves are not file content.
 
-          {expected}
+          BEGIN_FILE_CONTENT
+          {expected}END_FILE_CONTENT
+
           No other repository change is authorized.
 
           ## Untrusted issue data
