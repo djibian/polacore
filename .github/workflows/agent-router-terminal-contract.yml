@@ -5,6 +5,7 @@ on:
     branches: [engineering]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - '.gitignore'
       - 'scripts/agent_router_validate.py'
       - '.github/workflows/agent-real-task-v1-failure.yml'
       - '.github/workflows/agent-router-terminal-contract.yml'
@@ -22,7 +23,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate Router terminal-decision authority and failure recorder
+      - name: Validate Router authority, verified handoff, and failure recorder
         shell: bash
         run: |
           set -euo pipefail
@@ -71,12 +72,32 @@ jobs:
           print('Router terminal decision contract verified.')
           PY
 
+          grep -Fx '__pycache__/' .gitignore >/dev/null
+          grep -Fx '*.py[cod]' .gitignore >/dev/null
+          test ! -e scripts/list_invariants.py
+          test ! -e tests/test_list_invariants.py
+          printf '%s\n' 'print("candidate")' > scripts/list_invariants.py
+          printf '%s\n' 'import unittest' > tests/test_list_invariants.py
+          mkdir -p scripts/__pycache__ tests/__pycache__
+          : > scripts/__pycache__/list_invariants.cpython-312.pyc
+          : > tests/__pycache__/test_list_invariants.cpython-312.pyc
+          git check-ignore -q scripts/__pycache__/list_invariants.cpython-312.pyc
+          git check-ignore -q tests/__pycache__/test_list_invariants.cpython-312.pyc
+          status="$(git status --porcelain --untracked-files=all | sort)"
+          expected="$(printf '%s\n' '?? scripts/list_invariants.py' '?? tests/test_list_invariants.py' | sort)"
+          test "$status" = "$expected" || { printf 'Unexpected handoff status:\n%s\n' "$status" >&2; exit 1; }
+          rm -f scripts/list_invariants.py tests/test_list_invariants.py
+          rm -rf scripts/__pycache__ tests/__pycache__
+          echo 'Verified handoff ignores only deterministic Python bytecode caches.'
+
           grep -F "types: [opened, synchronize, reopened, ready_for_review]" .github/workflows/agent-router-terminal-contract.yml >/dev/null
           grep -F "github.event.action == 'ready_for_review'" .github/workflows/agent-router-terminal-contract.yml >/dev/null
           grep -F "workflows: ['PolaCore Real Task v1']" .github/workflows/agent-real-task-v1-failure.yml >/dev/null
           grep -F "github.event.workflow_run.event == 'issues'" .github/workflows/agent-real-task-v1-failure.yml >/dev/null
-          grep -F "github.event.workflow_run.conclusion != 'success'" .github/workflows/agent-real-task-v1-failure.yml >/dev/null
-          grep -F "'agent:route-3d' not in labels" .github/workflows/agent-real-task-v1-failure.yml >/dev/null
+          grep -F "github.event.workflow_run.conclusion == 'failure'" .github/workflows/agent-real-task-v1-failure.yml >/dev/null
+          grep -F "github.event.workflow_run.conclusion == 'timed_out'" .github/workflows/agent-real-task-v1-failure.yml >/dev/null
+          grep -F "armed = 'agent:route-3d' in labels" .github/workflows/agent-real-task-v1-failure.yml >/dev/null
+          grep -F "routed_normal = {'agent:ready-for-build','risk:normal'} <= labels" .github/workflows/agent-real-task-v1-failure.yml >/dev/null
           grep -F -- "--add-label 'agent:blocked' --add-label 'risk:unknown'" .github/workflows/agent-real-task-v1-failure.yml >/dev/null
           if grep -F 'ALBERT_API_KEY' .github/workflows/agent-real-task-v1-failure.yml >/dev/null; then
             echo 'failure recorder must never receive Albert secret' >&2
@@ -104,7 +125,7 @@ jobs:
           end
           RUBY
           while IFS= read -r script; do bash -n "$script"; done < /tmp/bash-blocks
-          echo 'Router terminal/failure static contract passed.'
+          echo 'Router terminal/handoff/failure static contract passed.'
 
   deepseek-router-contract:
     needs: contract
