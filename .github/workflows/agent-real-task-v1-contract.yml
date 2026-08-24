@@ -167,7 +167,7 @@ jobs:
         run: |
           set -uo pipefail
           set +e
-          opencode run --agent builder-task-3d --model albert/qwen3-coder-30b-A3b-instruct --format json \
+          opencode run --agent builder-task-3d --model albert/deepseek-v4-flash --format json \
             'Read agent-input/builder-context.md and execute only its TRUSTED TASK CONTRACT. The two target files do not exist; create them directly and stop after changing exactly those two files.' \
             2>&1 | tee /tmp/builder.jsonl
           status=${PIPESTATUS[0]}
@@ -356,7 +356,7 @@ jobs:
         run: |
           set -uo pipefail
           set +e
-          opencode run --agent builder-task-3d --model albert/qwen3-coder-30b-A3b-instruct --format json \
+          opencode run --agent builder-task-3d --model albert/deepseek-v4-flash --format json \
             'Read agent-input/builder-context.md. Repair only the two authorized files for the listed TRUSTED PRECHECK FEEDBACK codes, then stop.' \
             2>&1 | tee /tmp/repair.jsonl
           status=${PIPESTATUS[0]}
@@ -500,7 +500,7 @@ jobs:
         run: |
           set -uo pipefail
           set +e
-          opencode run --agent reviewer-task-3d --model albert/qwen3-coder-30b-A3b-instruct --format json \
+          opencode run --agent reviewer-task-3d --model albert/deepseek-v4-flash --format json \
             'Review only agent-input/reviewer-context.md and the two authorized generated files. Return the exact Reviewer JSON contract.' \
             2>&1 | tee /tmp/reviewer.jsonl
           status=${PIPESTATUS[0]}

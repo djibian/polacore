@@ -1,7 +1,7 @@
 ---
 description: Bounded PolaCore Builder for the first real NORMAL task; may edit only the invariant-listing utility and its tests
 mode: primary
-model: albert/qwen3-coder-30b-A3b-instruct
+model: albert/deepseek-v4-flash
 temperature: 0.1
 permission:
   read:
