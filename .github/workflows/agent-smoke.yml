@@ -8,6 +8,13 @@ on:
       - 'opencode.json'
       - '.opencode/agents/smoke.md'
       - '.github/workflows/agent-smoke.yml'
+  pull_request:
+    branches:
+      - engineering
+    paths:
+      - 'opencode.json'
+      - '.opencode/agents/smoke.md'
+      - '.github/workflows/agent-smoke.yml'
   workflow_dispatch:
 
 permissions:
@@ -19,6 +26,7 @@ concurrency:
 
 jobs:
   smoke:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
