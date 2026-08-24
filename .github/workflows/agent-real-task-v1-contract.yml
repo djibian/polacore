@@ -93,6 +93,36 @@ jobs:
 
           python3 -m py_compile scripts/agent_router_validate.py scripts/agent_reviewer_validate.py
 
+          python3 - <<'PY'
+          import json, pathlib, subprocess, tempfile
+          validator='scripts/agent_reviewer_validate.py'
+          good={
+              'verdict':'READY_FOR_HUMAN',
+              'confidence':0.91,
+              'rationale':'Synthetic terminal decision proving that preceding non-authoritative prose cannot itself drive state.'
+          }
+          def event(text):
+              return json.dumps({'type':'text','part':{'text':text}})+'\n'
+          def run(text, expect_ok):
+              with tempfile.TemporaryDirectory() as d:
+                  inp=pathlib.Path(d)/'in.jsonl'; out=pathlib.Path(d)/'out.json'
+                  inp.write_text(event(text),encoding='utf-8')
+                  p=subprocess.run(['python3',validator,str(inp),str(out)],capture_output=True,text=True)
+                  if expect_ok:
+                      assert p.returncode==0,(p.stdout,p.stderr)
+                      parsed=json.loads(out.read_text(encoding='utf-8'))
+                      assert parsed['verdict']=='READY_FOR_HUMAN',parsed
+                  else:
+                      assert p.returncode!=0,(p.stdout,p.stderr)
+          terminal=json.dumps(good,separators=(',',':'))
+          run('Non-authoritative review narration.\n'+terminal, True)
+          run('Earlier {"verdict":"BLOCKED"} decision.\n'+terminal, False)
+          bad=dict(good); bad['merge_authorized']=True
+          run(json.dumps(bad,separators=(',',':')), False)
+          run(terminal+'\ntrailing prose', False)
+          print('Terminal Reviewer decision authority contract verified.')
+          PY
+
           ruby - <<'RUBY' > /tmp/bash-blocks
           require 'psych'
           ARGV.each do |workflow|
