@@ -1,0 +1,65 @@
+name: Formal Constitution Experiment
+
+on:
+  pull_request:
+    branches:
+      - engineering
+    paths:
+      - 'experiments/formal-constitution/**'
+      - '.github/workflows/formal-constitution-experiment.yml'
+  push:
+    branches:
+      - codex/experiment/27-formal-security-constitution
+    paths:
+      - 'experiments/formal-constitution/**'
+      - '.github/workflows/formal-constitution-experiment.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: formal-constitution-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VERUS_VERSION: '0.2026.08.15.7d4628a'
+    steps:
+      - name: Checkout PolaCore
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Reject proof shortcuts and caller preconditions
+        run: python3 experiments/formal-constitution/check_proof_hygiene.py
+
+      - name: Download pinned Verus release
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://github.com/verus-lang/verus/releases/download/release%2F${VERUS_VERSION}/verus-${VERUS_VERSION}-x86-linux.zip"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            --retry 3 --output /tmp/verus.zip "$url"
+          unzip -q /tmp/verus.zip -d /tmp
+          test -x /tmp/verus-x86-linux/verus
+
+      - name: Record verifier and runner environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          uname -a
+          rustup --version
+          /tmp/verus-x86-linux/verus --version
+
+      - name: Mechanically verify candidate constitution
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/verus-x86-linux/verus \
+            experiments/formal-constitution/constitution.rs \
+            --expand-errors
+          echo 'VERIFIED_BY_CI candidate constitution obligations discharged.'
