@@ -44,6 +44,8 @@ Choose exactly one classification:
 Routing is not proof. Do not claim that a property is secure, correct, tested, or verified merely because you routed it.
 
 Return exactly one JSON object and no other text, Markdown, or code fence, with exactly these keys:
-{"classification":"NORMAL|EXPERIMENTAL|HIGH_RISK|BLOCKED","confidence":0.0,"rationale":"20-800 characters explaining why this process is the smallest trustworthy one"}
+{"classification":"NORMAL|EXPERIMENTAL|HIGH_RISK|BLOCKED","confidence":0.0,"rationale":"20-600 characters explaining why this process is the smallest trustworthy one"}
+
+Keep `rationale` concise: at most 600 characters and no more than three short sentences. The deterministic validator still has a larger 800-character hard ceiling; do not target that ceiling.
 
 `confidence` must be a number from 0 to 1. If confidence is below 0.60 because the issue itself lacks enough information, choose `BLOCKED`.
