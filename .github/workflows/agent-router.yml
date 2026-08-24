@@ -201,6 +201,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
+      actions: write
       contents: read
       issues: write
     env:
@@ -294,3 +295,28 @@ jobs:
           open('/tmp/router-comment.md','w',encoding='utf-8').write(text+'\n')
           PY
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/router-comment.md
+
+      - name: Dispatch bounded Builder for validated NORMAL
+        shell: bash
+        run: |
+          set -euo pipefail
+          classification="$(python3 -c "import json; print(json.load(open('/tmp/router-decision.json'))['classification'])")"
+          if [ "$classification" != 'NORMAL' ]; then
+            echo "No Builder dispatch for classification $classification."
+            exit 0
+          fi
+
+          gh workflow run agent-builder-canary.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref engineering \
+            -f issue_number="$ISSUE_NUMBER" \
+            -f source='router-normal-v1'
+
+          cat > /tmp/builder-dispatch-comment.md <<'EOF'
+          ### PolaCore autonomous chain
+
+          `VERIFIED_BY_CI` — deterministic Router state application dispatched the bounded Builder canary through `workflow_dispatch` after a validated `NORMAL` classification.
+
+          This is a process transition, not proof that the Builder output is correct. The Builder must still pass its own independent validation and publication gates.
+          EOF
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/builder-dispatch-comment.md
