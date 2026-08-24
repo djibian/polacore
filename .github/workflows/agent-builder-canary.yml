@@ -275,18 +275,20 @@ jobs:
           python3 - <<'PY'
           import os
           from pathlib import Path
+          from textwrap import dedent
           n=os.environ['ISSUE_NUMBER']
-          Path('/tmp/pr-body.md').write_text(f'''## Builder canary evidence
+          Path('/tmp/pr-body.md').write_text(dedent(f'''\
+          ## Builder canary evidence
 
-Closes no issue automatically. Canary source issue: #{n}.
+          Closes no issue automatically. Canary source issue: #{n}.
 
-- OpenCode 1.18.21 + Albert/Qwen3-Coder performed the edit in a job with `contents: read` + `issues: read` only.
-- The Builder had no shell, web, subagent, external-directory, or GitHub-write capability.
-- OpenCode edit permission was deny-by-default and allowed only `docs/automation/BUILDER_CANARY.md`.
-- A deterministic validator accepted exactly one changed path and exact expected content.
-- This publisher job had no Albert secret and reapplied the patch to a clean `engineering` checkout before pushing.
-- No automatic merge is authorized.
-''', encoding='utf-8')
+          - OpenCode 1.18.21 + Albert/Qwen3-Coder performed the edit in a job with `contents: read` + `issues: read` only.
+          - The Builder had no shell, web, subagent, external-directory, or GitHub-write capability.
+          - OpenCode edit permission was deny-by-default and allowed only `docs/automation/BUILDER_CANARY.md`.
+          - A deterministic validator accepted exactly one changed path and exact expected content.
+          - This publisher job had no Albert secret and reapplied the patch to a clean `engineering` checkout before pushing.
+          - No automatic merge is authorized.
+          '''), encoding='utf-8')
           PY
           pr_url="$(gh pr create \
             --repo "$GITHUB_REPOSITORY" \
@@ -297,12 +299,14 @@ Closes no issue automatically. Canary source issue: #{n}.
           PR_URL="$pr_url" python3 - <<'PY'
           import os
           from pathlib import Path
-          Path('/tmp/issue-comment.md').write_text(f'''### PolaCore Builder canary
+          from textwrap import dedent
+          Path('/tmp/issue-comment.md').write_text(dedent(f'''\
+          ### PolaCore Builder canary
 
-`VERIFIED_BY_CI` — the bounded Builder produced exactly one allowed documentation patch and the separate publisher opened: {os.environ['PR_URL']}
+          `VERIFIED_BY_CI` — the bounded Builder produced exactly one allowed documentation patch and the separate publisher opened: {os.environ['PR_URL']}
 
-No merge is automatic. This canary proves bounded edit + publication mechanics only.
-''', encoding='utf-8')
+          No merge is automatic. This canary proves bounded edit + publication mechanics only.
+          '''), encoding='utf-8')
           PY
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/issue-comment.md
           current="$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')"
