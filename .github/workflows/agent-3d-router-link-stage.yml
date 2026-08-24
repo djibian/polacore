@@ -1,5 +1,5 @@
-# Temporary staging workflow; removed after verified blob promotion.
-name: PolaCore 3D Router Link Stage
+# Temporary promotion workflow; self-removes after exact verified promotion.
+name: PolaCore 3D Router Link Promote
 
 on:
   pull_request:
@@ -12,45 +12,47 @@ permissions:
   contents: read
 
 jobs:
-  stage:
+  promote:
     if: github.event.pull_request.number == 37 && github.event.pull_request.head.repo.full_name == github.repository && github.actor == github.repository_owner
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    timeout-minutes: 8
     permissions:
       contents: write
     steps:
-      - name: Checkout PR head
+      - name: Checkout PR branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 1
 
-      - name: Generate exact staged Router wiring
+      - name: Promote exact strict Router wiring and remove temporary workflows
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
 
-          op=Path('.github/workflows/agent-real-task-v1.yml').read_text(encoding='utf-8')
+          op_path=Path('.github/workflows/agent-real-task-v1.yml')
+          op=op_path.read_text(encoding='utf-8')
           old='opencode run --agent router --model albert/deepseek-v4-flash --format json'
           new='opencode run --agent router-task-3d --model albert/deepseek-v4-flash --format json'
           if op.count(old) != 1:
-              raise SystemExit(f'operational Router call count mismatch: {op.count(old)}')
+              raise SystemExit(f'operational Router call mismatch: {op.count(old)}')
           op=op.replace(old,new)
           trigger="      - '.opencode/agents/reviewer-task-3d.md'\n"
           if op.count(trigger) != 1:
               raise SystemExit('operational trigger anchor mismatch')
-          op=op.replace(trigger, trigger+"      - '.opencode/agents/router-task-3d.md'\n",1)
+          op=op.replace(trigger, trigger+"      - '.opencode/agents/router-task-3d.md'\n", 1)
+          op_path.write_text(op,encoding='utf-8')
 
-          contract=Path('.github/workflows/agent-real-task-v1-contract.yml').read_text(encoding='utf-8')
-          trigger="      - '.opencode/agents/reviewer-task-3d.md'\n"
+          contract_path=Path('.github/workflows/agent-real-task-v1-contract.yml')
+          contract=contract_path.read_text(encoding='utf-8')
           if contract.count(trigger) != 1:
               raise SystemExit('contract trigger anchor mismatch')
-          contract=contract.replace(trigger, trigger+"      - '.opencode/agents/router-task-3d.md'\n",1)
+          contract=contract.replace(trigger, trigger+"      - '.opencode/agents/router-task-3d.md'\n", 1)
           anchor="          reviewer=frontmatter('.opencode/agents/reviewer-task-3d.md')\n"
           if contract.count(anchor) != 1:
-              raise SystemExit('contract Router assertion anchor mismatch')
+              raise SystemExit('Router assertion anchor mismatch')
           checks="""          router=frontmatter('.opencode/agents/router-task-3d.md')
           rtp=router.fetch('permission')
           rread=rtp.fetch('read')
@@ -63,26 +65,26 @@ jobs:
             abort \"3D Router tool must deny: #{tool}\" unless rtp[tool]=='deny'
           end
 """
-          contract=contract.replace(anchor,checks+anchor,1)
+          contract=contract.replace(anchor, checks+anchor, 1)
           grep_anchor="          grep -F \"github.event.issue.number == 36\" .github/workflows/agent-real-task-v1.yml >/dev/null\n"
           if contract.count(grep_anchor) != 1:
-              raise SystemExit('contract Router call grep anchor mismatch')
-          contract=contract.replace(grep_anchor,grep_anchor+"          grep -F 'opencode run --agent router-task-3d --model albert/deepseek-v4-flash --format json' .github/workflows/agent-real-task-v1.yml >/dev/null\n",1)
-
-          root=Path('agent-staging/3d-router-link'); root.mkdir(parents=True,exist_ok=True)
-          (root/'agent-real-task-v1.yml').write_text(op,encoding='utf-8')
-          (root/'agent-real-task-v1-contract.yml').write_text(contract,encoding='utf-8')
+              raise SystemExit('Router call grep anchor mismatch')
+          contract=contract.replace(grep_anchor, grep_anchor+"          grep -F 'opencode run --agent router-task-3d --model albert/deepseek-v4-flash --format json' .github/workflows/agent-real-task-v1.yml >/dev/null\n", 1)
+          contract_path.write_text(contract,encoding='utf-8')
           PY
+
           ruby -e "require 'psych'; ARGV.each { |p| Psych.parse_file(p) }" \
-            agent-staging/3d-router-link/agent-real-task-v1.yml \
-            agent-staging/3d-router-link/agent-real-task-v1-contract.yml
+            .github/workflows/agent-real-task-v1.yml \
+            .github/workflows/agent-real-task-v1-contract.yml
+          grep -F "opencode run --agent router-task-3d --model albert/deepseek-v4-flash --format json" .github/workflows/agent-real-task-v1.yml >/dev/null
+          grep -F "'.opencode/agents/router-task-3d.md'" .github/workflows/agent-real-task-v1.yml .github/workflows/agent-real-task-v1-contract.yml >/dev/null
+
+          git rm .github/workflows/agent-3d-deepseek-probe.yml .github/workflows/agent-3d-router-link-stage.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add agent-staging/3d-router-link
-          staged="$(git diff --cached --name-only | sort)"
-          expected="$(printf '%s\n' \
-            'agent-staging/3d-router-link/agent-real-task-v1-contract.yml' \
-            'agent-staging/3d-router-link/agent-real-task-v1.yml' | sort)"
-          test "$staged" = "$expected" || { printf 'unexpected staging paths:\n%s\n' "$staged" >&2; exit 1; }
-          git commit -m 'test: stage strict 3D Router wiring blobs'
+          git add .github/workflows/agent-real-task-v1.yml .github/workflows/agent-real-task-v1-contract.yml
+          staged="$(git diff --cached --name-status | sort)"
+          printf '%s\n' "$staged"
+          test "$(printf '%s\n' "$staged" | wc -l)" -eq 4
+          git commit -m 'infra: wire strict DeepSeek Router into real task v1'
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
