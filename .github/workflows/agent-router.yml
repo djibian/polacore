@@ -5,8 +5,12 @@ on:
     branches: [engineering]
     paths:
       - '.github/workflows/agent-router.yml'
+      - '.github/workflows/agent-ci-canary.yml'
+      - '.github/workflows/agent-reviewer-canary.yml'
       - '.opencode/agents/router.md'
+      - '.opencode/agents/reviewer-canary.md'
       - 'scripts/agent_router_validate.py'
+      - 'scripts/agent_reviewer_validate.py'
   issues:
     types: [labeled]
   workflow_dispatch:
@@ -44,6 +48,10 @@ jobs:
           ensure_label 'agent:ready-for-build' '0E8A16' 'Router says routine work may proceed to Builder'
           ensure_label 'agent:needs-experiment' 'FBCA04' 'Router requires Experimenter evidence before Builder'
           ensure_label 'agent:blocked' 'B60205' 'Router cannot select a trustworthy autonomous next step'
+          ensure_label 'agent:ci-passed' '1D76DB' 'Deterministic exact-SHA CI completed successfully'
+          ensure_label 'agent:ready-for-human' '0E8A16' 'CI and read-only Reviewer found no blocking defect; human decision required'
+          ensure_label 'agent:changes-required' 'B60205' 'Reviewer found a blocking defect requiring changes'
+          ensure_label 'agent:review-blocked' 'D93F0B' 'CI or Reviewer could not produce a trustworthy final state'
           ensure_label 'risk:normal' 'C2E0C6' 'Routine bounded work; normal process'
           ensure_label 'risk:experimental' 'FEF2C0' 'Material uncertainty requires experiment'
           ensure_label 'risk:high' 'D93F0B' 'Security-critical work requiring adversarial process'
@@ -256,6 +264,10 @@ jobs:
           ensure_label 'agent:ready-for-build' '0E8A16' 'Router says routine work may proceed to Builder'
           ensure_label 'agent:needs-experiment' 'FBCA04' 'Router requires Experimenter evidence before Builder'
           ensure_label 'agent:blocked' 'B60205' 'Router cannot select a trustworthy autonomous next step'
+          ensure_label 'agent:ci-passed' '1D76DB' 'Deterministic exact-SHA CI completed successfully'
+          ensure_label 'agent:ready-for-human' '0E8A16' 'CI and read-only Reviewer found no blocking defect; human decision required'
+          ensure_label 'agent:changes-required' 'B60205' 'Reviewer found a blocking defect requiring changes'
+          ensure_label 'agent:review-blocked' 'D93F0B' 'CI or Reviewer could not produce a trustworthy final state'
           ensure_label 'risk:normal' 'C2E0C6' 'Routine bounded work; normal process'
           ensure_label 'risk:experimental' 'FEF2C0' 'Material uncertainty requires experiment'
           ensure_label 'risk:high' 'D93F0B' 'Security-critical work requiring adversarial process'
@@ -278,6 +290,7 @@ jobs:
           current="$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')"
           for label in \
             'agent:route' 'agent:ready-for-build' 'agent:needs-experiment' 'agent:blocked' \
+            'agent:ci-passed' 'agent:ready-for-human' 'agent:changes-required' 'agent:review-blocked' \
             'risk:normal' 'risk:experimental' 'risk:high' 'risk:unknown'; do
             if grep -Fxq "$label" <<< "$current"; then
               gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label"
@@ -317,26 +330,145 @@ jobs:
     secrets:
       ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
 
-  record-chain:
+  ci:
     needs: [route-analysis, apply-state, builder]
     if: needs.builder.result == 'success'
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    uses: ./.github/workflows/agent-ci-canary.yml
+    with:
+      issue_number: ${{ needs.route-analysis.outputs.issue_number }}
+      source: router-ci-reviewer-v1
+
+  reviewer:
+    needs: [route-analysis, apply-state, builder, ci]
+    if: needs.ci.result == 'success' && needs.ci.outputs.ci_result == 'PASS'
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    uses: ./.github/workflows/agent-reviewer-canary.yml
+    with:
+      issue_number: ${{ needs.route-analysis.outputs.issue_number }}
+      pr_number: ${{ needs.ci.outputs.pr_number }}
+      head_sha: ${{ needs.ci.outputs.head_sha }}
+      ci_result: ${{ needs.ci.outputs.ci_result }}
+      source: router-ci-reviewer-v1
+    secrets:
+      ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+
+  finalize:
+    needs: [route-analysis, apply-state, builder, ci, reviewer]
+    if: always() && needs.builder.result == 'success'
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
       issues: write
+      pull-requests: write
     env:
       GH_TOKEN: ${{ github.token }}
       ISSUE_NUMBER: ${{ needs.route-analysis.outputs.issue_number }}
+      CI_JOB_RESULT: ${{ needs.ci.result }}
+      CI_RESULT: ${{ needs.ci.outputs.ci_result }}
+      PR_NUMBER: ${{ needs.ci.outputs.pr_number }}
+      PR_URL: ${{ needs.ci.outputs.pr_url }}
+      HEAD_SHA: ${{ needs.ci.outputs.head_sha }}
+      REVIEWER_JOB_RESULT: ${{ needs.reviewer.result }}
+      REVIEW_DECISION_B64: ${{ needs.reviewer.outputs.decision_b64 }}
     steps:
-      - name: Record successful Router to Builder chain
+      - name: Revalidate CI and Reviewer handoff
+        id: final
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/chain-comment.md <<'EOF'
-          ### PolaCore autonomous chain v2
+          state_label='agent:review-blocked'
+          verdict='BLOCKED'
+          confidence='0.00'
+          rationale='CI or Reviewer did not complete successfully; no autonomous ready-for-human claim is allowed.'
+          ci_passed='false'
 
-          `VERIFIED_BY_CI` — after a validated `NORMAL` Router decision, GitHub invoked the bounded Builder as a reusable workflow via `workflow_call`, and the called Builder workflow completed successfully.
+          if [ "$CI_JOB_RESULT" = 'success' ] && [ "$CI_RESULT" = 'PASS' ]; then
+            ci_passed='true'
+            if [ "$REVIEWER_JOB_RESULT" = 'success' ] && [ -n "$REVIEW_DECISION_B64" ]; then
+              printf '%s' "$REVIEW_DECISION_B64" | base64 --decode > /tmp/reviewer-decision.json
+              python3 - <<'PY'
+              import json
+              d=json.load(open('/tmp/reviewer-decision.json', encoding='utf-8'))
+              if set(d) != {'verdict','confidence','rationale'}:
+                  raise SystemExit('finalizer rejected Reviewer decision keys')
+              if d.get('verdict') not in {'READY_FOR_HUMAN','CHANGES_REQUIRED','BLOCKED'}:
+                  raise SystemExit('finalizer rejected Reviewer verdict')
+              c=d.get('confidence')
+              if isinstance(c, bool) or not isinstance(c, (int,float)) or not 0 <= float(c) <= 1:
+                  raise SystemExit('finalizer rejected Reviewer confidence')
+              r=d.get('rationale')
+              if not isinstance(r, str) or not 20 <= len(r) <= 800:
+                  raise SystemExit('finalizer rejected Reviewer rationale')
+              PY
+              verdict="$(python3 -c "import json; print(json.load(open('/tmp/reviewer-decision.json'))['verdict'])")"
+              confidence="$(python3 -c "import json; print(f\"{float(json.load(open('/tmp/reviewer-decision.json'))['confidence']):.2f}\")")"
+              rationale="$(python3 -c "import json; print(json.load(open('/tmp/reviewer-decision.json'))['rationale'])")"
+              case "$verdict" in
+                READY_FOR_HUMAN) state_label='agent:ready-for-human' ;;
+                CHANGES_REQUIRED) state_label='agent:changes-required' ;;
+                BLOCKED) state_label='agent:review-blocked' ;;
+                *) exit 1 ;;
+              esac
+            fi
+          fi
 
-          The Builder still applied its own independent issue-state, path-scope, exact-content, clean-checkout, and publication gates. No merge is automatic.
+          echo "state_label=$state_label" >> "$GITHUB_OUTPUT"
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          echo "confidence=$confidence" >> "$GITHUB_OUTPUT"
+          echo "ci_passed=$ci_passed" >> "$GITHUB_OUTPUT"
+          RATIONALE="$rationale" python3 - <<'PY'
+          import html, os
+          r=html.escape(os.environ['RATIONALE']).replace('@','@\u200b')
+          open('/tmp/final-rationale.txt','w',encoding='utf-8').write(r)
+          PY
+
+      - name: Apply final autonomous state and evidence
+        env:
+          STATE_LABEL: ${{ steps.final.outputs.state_label }}
+          VERDICT: ${{ steps.final.outputs.verdict }}
+          CONFIDENCE: ${{ steps.final.outputs.confidence }}
+          CI_PASSED: ${{ steps.final.outputs.ci_passed }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')"
+          for label in 'agent:ready-for-build' 'agent:ci-passed' 'agent:ready-for-human' 'agent:changes-required' 'agent:review-blocked'; do
+            if grep -Fxq "$label" <<< "$current"; then
+              gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label"
+            fi
+          done
+          if [ "$CI_PASSED" = 'true' ]; then
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label 'agent:ci-passed'
+          fi
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "$STATE_LABEL"
+
+          rationale="$(cat /tmp/final-rationale.txt)"
+          cat > /tmp/final-comment.md <<EOF
+          ### PolaCore CI + Reviewer canary
+
+          - CI: \`${CI_RESULT:-UNPROVEN}\`
+          - Exact Builder SHA: \`${HEAD_SHA:-UNAVAILABLE}\`
+          - Reviewer verdict: **${VERDICT}**
+          - Reviewer confidence: \`${CONFIDENCE}\`
+          - Final state: \`${STATE_LABEL}\`
+          - Reviewer rationale: ${rationale}
+
+          \`VERIFIED_BY_CI\` applies only to the deterministic canary checks when CI is PASS. The Reviewer conclusion is an \`INFERENCE\` from a read-only Albert/OpenCode job. Neither result authorizes merge; human review remains required.
           EOF
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/chain-comment.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/final-comment.md
+
+          if [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/final-comment.md
+            gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "$STATE_LABEL"
+            if [ "$CI_PASSED" = 'true' ]; then
+              gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label 'agent:ci-passed'
+            fi
+          fi
