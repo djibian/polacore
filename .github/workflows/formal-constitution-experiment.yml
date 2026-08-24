@@ -63,16 +63,16 @@ jobs:
           rustup run "$VERUS_RUST_TOOLCHAIN" rustc --version
           /tmp/verus-x86-linux/verus --version
 
-      - name: Mechanically verify candidate constitution
+      - name: Mechanically verify v0 pedagogical model
         shell: bash
         run: |
           set -euo pipefail
           /tmp/verus-x86-linux/verus \
             experiments/formal-constitution/constitution.rs \
             --expand-errors
-          echo 'VERIFIED_BY_CI candidate constitution obligations discharged.'
+          echo 'VERIFIED_BY_CI v0 obligations discharged; useful authority claim remains intentionally insufficient.'
 
-      - name: Require rejection of a deliberately broken gate
+      - name: Require rejection of v0 removed constitutional gate
         shell: bash
         run: |
           set -euo pipefail
@@ -80,14 +80,44 @@ jobs:
 
           set +e
           /tmp/verus-x86-linux/verus /tmp/constitution-broken.rs --expand-errors \
-            > /tmp/negative-control.log 2>&1
+            > /tmp/negative-control-v0.log 2>&1
           status=$?
           set -e
 
-          cat /tmp/negative-control.log
+          cat /tmp/negative-control-v0.log
           if [ "$status" -eq 0 ]; then
-            echo 'REFUTED: Verus accepted the deliberately unconstitutional implementation.' >&2
+            echo 'REFUTED: Verus accepted the deliberately unconstitutional v0 implementation.' >&2
             exit 1
           fi
 
-          echo 'VERIFIED_BY_CI negative control: verifier rejected removed constitutional mediation.'
+          echo 'VERIFIED_BY_CI v0 negative control rejected.'
+
+      - name: Mechanically verify v1 trusted-state capability kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/verus-x86-linux/verus \
+            experiments/formal-constitution/capability_kernel.rs \
+            --expand-errors
+          echo 'VERIFIED_BY_CI v1 trusted-state capability obligations discharged.'
+
+      - name: Require rejection of v1 removed subject binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 experiments/formal-constitution/make_capability_negative_control.py \
+            /tmp/capability-kernel-broken.rs
+
+          set +e
+          /tmp/verus-x86-linux/verus /tmp/capability-kernel-broken.rs --expand-errors \
+            > /tmp/negative-control-v1.log 2>&1
+          status=$?
+          set -e
+
+          cat /tmp/negative-control-v1.log
+          if [ "$status" -eq 0 ]; then
+            echo 'REFUTED: Verus accepted the subject-unbound v1 implementation.' >&2
+            exit 1
+          fi
+
+          echo 'VERIFIED_BY_CI v1 negative control: verifier rejected removed subject binding.'
