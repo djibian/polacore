@@ -394,23 +394,21 @@ jobs:
             ci_passed='true'
             if [ "$REVIEWER_JOB_RESULT" = 'success' ] && [ -n "$REVIEW_DECISION_B64" ]; then
               printf '%s' "$REVIEW_DECISION_B64" | base64 --decode > /tmp/reviewer-decision.json
-              python3 - <<'PY'
-              import json
-              d=json.load(open('/tmp/reviewer-decision.json', encoding='utf-8'))
-              if set(d) != {'verdict','confidence','rationale'}:
-                  raise SystemExit('finalizer rejected Reviewer decision keys')
-              if d.get('verdict') not in {'READY_FOR_HUMAN','CHANGES_REQUIRED','BLOCKED'}:
-                  raise SystemExit('finalizer rejected Reviewer verdict')
-              c=d.get('confidence')
-              if isinstance(c, bool) or not isinstance(c, (int,float)) or not 0 <= float(c) <= 1:
-                  raise SystemExit('finalizer rejected Reviewer confidence')
-              r=d.get('rationale')
-              if not isinstance(r, str) or not 20 <= len(r) <= 800:
-                  raise SystemExit('finalizer rejected Reviewer rationale')
-              PY
-              verdict="$(python3 -c "import json; print(json.load(open('/tmp/reviewer-decision.json'))['verdict'])")"
-              confidence="$(python3 -c "import json; print(f\"{float(json.load(open('/tmp/reviewer-decision.json'))['confidence']):.2f}\")")"
-              rationale="$(python3 -c "import json; print(json.load(open('/tmp/reviewer-decision.json'))['rationale'])")"
+              jq -e '
+                type == "object" and
+                (keys == ["confidence","rationale","verdict"]) and
+                (.verdict == "READY_FOR_HUMAN" or .verdict == "CHANGES_REQUIRED" or .verdict == "BLOCKED") and
+                (.confidence | type == "number") and
+                (.confidence >= 0 and .confidence <= 1) and
+                (.rationale | type == "string") and
+                (.rationale | length >= 20 and length <= 800)
+              ' /tmp/reviewer-decision.json >/dev/null || {
+                echo 'finalizer rejected Reviewer decision' >&2
+                exit 1
+              }
+              verdict="$(jq -r '.verdict' /tmp/reviewer-decision.json)"
+              printf -v confidence '%.2f' "$(jq -r '.confidence' /tmp/reviewer-decision.json)"
+              rationale="$(jq -r '.rationale' /tmp/reviewer-decision.json)"
               case "$verdict" in
                 READY_FOR_HUMAN) state_label='agent:ready-for-human' ;;
                 CHANGES_REQUIRED) state_label='agent:changes-required' ;;
