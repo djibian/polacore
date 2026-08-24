@@ -47,10 +47,35 @@ jobs:
           grep -F 'repair-builder:' .github/workflows/agent-real-task-v1.yml >/dev/null
           grep -F 'final-verify:' .github/workflows/agent-real-task-v1.yml >/dev/null
           grep -F 'TRUSTED PRECHECK FEEDBACK' .github/workflows/agent-real-task-v1.yml .opencode/agents/builder-task-3d.md >/dev/null
-          grep -F '"scripts/list_invariants.py": allow' .opencode/agents/builder-task-3d.md >/dev/null
-          grep -F '"tests/test_list_invariants.py": allow' .opencode/agents/builder-task-3d.md >/dev/null
-          grep -F 'bash: deny' .opencode/agents/builder-task-3d.md >/dev/null
-          grep -F 'edit: deny' .opencode/agents/reviewer-task-3d.md >/dev/null
+
+          ruby - <<'RUBY'
+          require 'psych'
+          def frontmatter(path)
+            text=File.read(path)
+            parts=text.split(/^---\s*$\n?/)
+            abort "missing frontmatter: #{path}" if parts.length < 3
+            Psych.safe_load(parts[1], aliases: true)
+          end
+          builder=frontmatter('.opencode/agents/builder-task-3d.md')
+          bp=builder.fetch('permission')
+          edit=bp.fetch('edit')
+          read=bp.fetch('read')
+          abort 'Builder wildcard edit must deny' unless edit['*']=='deny'
+          abort 'Builder script edit missing' unless edit['scripts/list_invariants.py']=='allow'
+          abort 'Builder test edit missing' unless edit['tests/test_list_invariants.py']=='allow'
+          abort 'Builder must not edit invariant registry' if edit['docs/security/INVARIANTS.md']=='allow'
+          abort 'Builder wildcard read must deny' unless read['*']=='deny'
+          %w[AGENTS.md docs/security/INVARIANTS.md agent-input/builder-context.md scripts/list_invariants.py tests/test_list_invariants.py].each do |path|
+            abort "Builder read missing: #{path}" unless read[path]=='allow'
+          end
+          %w[glob grep list bash task skill lsp webfetch websearch external_directory question todowrite].each do |tool|
+            abort "Builder tool must deny: #{tool}" unless bp[tool]=='deny'
+          end
+          reviewer=frontmatter('.opencode/agents/reviewer-task-3d.md')
+          rp=reviewer.fetch('permission')
+          abort 'Reviewer edit must deny' unless rp['edit']=='deny'
+          abort 'Reviewer bash must deny' unless rp['bash']=='deny'
+          RUBY
 
           needle="--agent"" router"
           if grep -F -- "$needle" .github/workflows/agent-real-task-v1-contract.yml >/dev/null; then
@@ -63,10 +88,6 @@ jobs:
           fi
           if grep -F 'secrets: inherit' .github/workflows/agent-real-task-v1.yml >/dev/null; then
             echo 'operational 3D workflow must not inherit all repository secrets' >&2
-            exit 1
-          fi
-          if grep -F '"docs/security/INVARIANTS.md": allow' .opencode/agents/builder-task-3d.md >/dev/null; then
-            echo 'Builder must never edit the invariant registry' >&2
             exit 1
           fi
 
