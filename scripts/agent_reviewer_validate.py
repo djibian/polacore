@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Validate an OpenCode JSONL Reviewer response and derive a deterministic review state."""
+"""Validate an OpenCode JSONL Reviewer response and derive a deterministic review state.
+
+Reviewer prose is never authoritative. The validator accepts either an exact JSON
+final text (the original contract) or, for models that emit non-authoritative
+review narration, exactly one decision-shaped JSON object on the final non-empty
+line. Any earlier decision-shaped JSON is rejected. Only the validated terminal
+object can drive repository state.
+"""
 
 from __future__ import annotations
 
@@ -34,18 +41,46 @@ def extract_last_text(path: pathlib.Path) -> str:
     return texts[-1]
 
 
+def extract_decision(raw_text: str) -> object:
+    """Return the sole authoritative JSON decision from the final model text.
+
+    Prefer the historical strict contract where the complete final text is JSON.
+    If that fails, permit non-authoritative prose only before a terminal JSON
+    object. A previous line containing a decision-shaped `verdict` key is
+    rejected so the controller never chooses between competing model decisions.
+    """
+    if raw_text.startswith("```") or raw_text.endswith("```"):
+        fail("Markdown/code fences are forbidden")
+
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+        pass
+
+    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    if not lines:
+        fail("final text is empty")
+
+    candidate = lines[-1]
+    if not (candidate.startswith("{") and candidate.endswith("}")):
+        fail("final non-empty line is not a JSON object")
+    if '"verdict"' in "\n".join(lines[:-1]):
+        fail("multiple decision-shaped outputs are forbidden")
+    if candidate.startswith("```") or candidate.endswith("```"):
+        fail("Markdown/code fences are forbidden")
+
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError as exc:
+        fail(f"terminal JSON decision is invalid: {exc}")
+
+
 def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit("usage: agent_reviewer_validate.py OPEN_CODE_JSONL OUTPUT_JSON")
 
     raw_text = extract_last_text(pathlib.Path(sys.argv[1]))
-    if raw_text.startswith("```") or raw_text.endswith("```"):
-        fail("Markdown/code fences are forbidden")
-
-    try:
-        decision = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
-        fail(f"final text is not a JSON object: {exc}")
+    decision = extract_decision(raw_text)
 
     if not isinstance(decision, dict):
         fail("final JSON must be an object")
