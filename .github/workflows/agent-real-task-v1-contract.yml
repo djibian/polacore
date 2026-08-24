@@ -57,12 +57,12 @@ jobs:
             echo '3D dynamic contract must reuse the already-proven Router contract' >&2
             exit 1
           fi
-          if grep -F 'actions: write' .github/workflows/agent-real-task-v1.yml .github/workflows/agent-real-task-v1-contract.yml >/dev/null; then
-            echo '3D workflows must not gain Actions write permission' >&2
+          if grep -F 'actions: write' .github/workflows/agent-real-task-v1.yml >/dev/null; then
+            echo 'operational 3D workflow must not gain Actions write permission' >&2
             exit 1
           fi
-          if grep -F 'secrets: inherit' .github/workflows/agent-real-task-v1.yml .github/workflows/agent-real-task-v1-contract.yml >/dev/null; then
-            echo '3D workflows must not inherit all repository secrets' >&2
+          if grep -F 'secrets: inherit' .github/workflows/agent-real-task-v1.yml >/dev/null; then
+            echo 'operational 3D workflow must not inherit all repository secrets' >&2
             exit 1
           fi
           if grep -F '"docs/security/INVARIANTS.md": allow' .opencode/agents/builder-task-3d.md >/dev/null; then
