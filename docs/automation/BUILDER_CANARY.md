@@ -2,4 +2,4 @@
 
 This file is reserved for proving bounded autonomous Builder behavior in GitHub Actions.
 
-Canary status: BASELINE
+Canary status: BUILT_FOR_ISSUE_26
