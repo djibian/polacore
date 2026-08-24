@@ -15,6 +15,11 @@ on:
         description: 'NORMAL issue number authorized for Builder canary'
         required: true
         type: string
+      source:
+        description: 'Trusted dispatch source; owner manual runs may leave the default'
+        required: false
+        default: 'manual'
+        type: string
 
 permissions:
   contents: read
@@ -45,7 +50,9 @@ jobs:
 
   build-patch:
     if: >-
-      (github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner) ||
+      (github.event_name == 'workflow_dispatch' &&
+       (github.actor == github.repository_owner ||
+        (github.actor == 'github-actions[bot]' && github.event.inputs.source == 'router-normal-v1'))) ||
       (github.event_name == 'issues' &&
        github.event.action == 'labeled' &&
        github.event.label.name == 'agent:build-canary' &&
@@ -71,11 +78,14 @@ jobs:
           ref: engineering
           persist-credentials: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '24'
-          package-manager-cache: false
+      - name: Verify runner Node.js toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          major="$(node -p "process.versions.node.split('.')[0]")"
+          test "$major" -ge 22 || { echo "Node.js >=22 required; got $(node --version)" >&2; exit 1; }
+          node --version
+          npm --version
 
       - name: Resolve issue number
         id: issue

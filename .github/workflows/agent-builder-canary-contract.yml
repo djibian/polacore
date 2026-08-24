@@ -33,19 +33,25 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Parse operational workflow YAML
+      - name: Parse operational workflow YAML and chain guard
         shell: bash
         run: |
           set -euo pipefail
           ruby -e "require 'psych'; Psych.parse_file(ARGV[0])" .github/workflows/agent-builder-canary.yml
           grep -Fx '  workflow_dispatch:' .github/workflows/agent-builder-canary.yml >/dev/null
-          echo 'Operational Builder workflow parses as YAML and retains workflow_dispatch.'
+          grep -F "github.actor == 'github-actions[bot]'" .github/workflows/agent-builder-canary.yml >/dev/null
+          grep -F "github.event.inputs.source == 'router-normal-v1'" .github/workflows/agent-builder-canary.yml >/dev/null
+          grep -Fx '      source:' .github/workflows/agent-builder-canary.yml >/dev/null
+          echo 'Operational Builder workflow parses and retains guarded Router dispatch authorization.'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '24'
-          package-manager-cache: false
+      - name: Verify runner Node.js toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          major="$(node -p "process.versions.node.split('.')[0]")"
+          test "$major" -ge 22 || { echo "Node.js >=22 required; got $(node --version)" >&2; exit 1; }
+          node --version
+          npm --version
 
       - name: Require Albert secret
         env:
