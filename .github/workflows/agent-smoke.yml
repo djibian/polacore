@@ -1,0 +1,66 @@
+name: Agent Smoke - Albert + OpenCode
+
+on:
+  push:
+    branches:
+      - infra/albert-opencode-smoke
+    paths:
+      - 'opencode.json'
+      - '.opencode/agents/smoke.md'
+      - '.github/workflows/agent-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+      OPENCODE_AUTO_SHARE: 'false'
+      OPENCODE_DISABLE_AUTOUPDATE: 'true'
+      OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true'
+      OPENCODE_DISABLE_LSP_DOWNLOAD: 'true'
+      OPENCODE_DISABLE_CLAUDE_CODE: 'true'
+    steps:
+      - name: Checkout PolaCore
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Require Albert secret
+        shell: bash
+        run: |
+          if [ -z "${ALBERT_API_KEY:-}" ]; then
+            echo 'ALBERT_API_KEY repository secret is missing.' >&2
+            exit 1
+          fi
+
+      - name: Install pinned OpenCode
+        run: npm install --global opencode-ai@1.18.21
+
+      - name: Record OpenCode version
+        run: opencode --version
+
+      - name: Run read-only Albert smoke agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          opencode run \
+            --agent smoke \
+            --model albert/DeepSeek-V4-Flash \
+            --format json \
+            "Perform the PolaCore infrastructure smoke check exactly as defined by your agent instructions." \
+            | tee /tmp/polacore-agent-smoke.jsonl
+
+          grep -F 'POLACORE_ALBERT_OPENCODE_SMOKE_OK' /tmp/polacore-agent-smoke.jsonl >/dev/null
+          echo 'Smoke marker verified.'
