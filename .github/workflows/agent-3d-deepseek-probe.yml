@@ -1,9 +1,8 @@
 name: PolaCore 3D Router Wiring Stager
 
 on:
-  pull_request:
-    branches: [engineering]
-    types: [synchronize]
+  push:
+    branches: [infra/agent-real-task-v1]
     paths:
       - '.github/workflows/agent-3d-deepseek-probe.yml'
 
@@ -12,16 +11,16 @@ permissions:
 
 jobs:
   stage:
-    if: github.event.pull_request.number == 37 && github.event.pull_request.head.repo.full_name == github.repository && github.actor == github.repository_owner
+    if: github.actor == github.repository_owner
     runs-on: ubuntu-24.04
     timeout-minutes: 6
     permissions:
       contents: write
     steps:
-      - name: Checkout PR head
+      - name: Checkout exact branch head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: infra/agent-real-task-v1
           fetch-depth: 1
 
       - name: Generate exact staged Router wiring
@@ -75,4 +74,4 @@ jobs:
           expected="$(printf '%s\n' 'agent-staging/3d-router-link/agent-real-task-v1-contract.yml' 'agent-staging/3d-router-link/agent-real-task-v1.yml' | sort)"
           test "$staged" = "$expected" || { printf 'unexpected staging paths:\n%s\n' "$staged" >&2; exit 1; }
           git commit -m 'test: stage strict 3D Router wiring blobs'
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          git push origin HEAD:infra/agent-real-task-v1
