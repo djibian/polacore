@@ -1,0 +1,65 @@
+name: PolaCore Real Task v1 Failure Recorder
+
+on:
+  workflow_run:
+    workflows: ['PolaCore Real Task v1']
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  record-routing-failure:
+    if: >-
+      github.event.workflow_run.event == 'issues' &&
+      github.event.workflow_run.conclusion != 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_NUMBER: '36'
+      FAILED_RUN_ID: ${{ github.event.workflow_run.id }}
+      FAILED_RUN_URL: ${{ github.event.workflow_run.html_url }}
+      FAILED_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+    steps:
+      - name: Persist fail-closed task state only for an armed open pilot
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,labels > /tmp/issue.json
+          if ! python3 - <<'PY'
+          import json
+          issue=json.load(open('/tmp/issue.json',encoding='utf-8'))
+          labels={x['name'] for x in issue.get('labels',[])}
+          if issue.get('state') != 'OPEN':
+              raise SystemExit('pilot issue is not open')
+          if 'agent:route-3d' not in labels:
+              raise SystemExit('pilot is not armed')
+          PY
+          then
+            echo 'Failure run is not tied to an armed open #36; no state change.'
+            exit 0
+          fi
+
+          ensure_label() { gh label create "$1" --repo "$GITHUB_REPOSITORY" --color "$2" --description "$3" --force; }
+          ensure_label 'agent:blocked' 'B60205' 'Router cannot select a trustworthy next step'
+          ensure_label 'risk:unknown' 'D4C5F9' 'Risk cannot yet be classified reliably'
+
+          current="$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')"
+          for label in agent:route-3d agent:ready-for-build agent:needs-experiment agent:ci-passed agent:ready-for-human agent:changes-required agent:review-blocked risk:normal risk:experimental risk:high; do
+            if grep -Fxq "$label" <<< "$current"; then
+              gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label"
+            fi
+          done
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label 'agent:blocked' --add-label 'risk:unknown'
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "### PolaCore Real Task v1 failure recorder
+
+          - Workflow conclusion: \`${FAILED_CONCLUSION}\`
+          - Run: ${FAILED_RUN_URL} (id \`${FAILED_RUN_ID}\`)
+          - State: \`agent:blocked\`
+          - Risk: \`risk:unknown\`
+
+          \`UNPROVEN\` — the autonomous chain failed before establishing a trustworthy next state. No Builder result is accepted from this run."
