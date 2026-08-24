@@ -34,6 +34,17 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Parse operational workflow YAML and chain wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e "require 'psych'; Psych.parse_file(ARGV[0])" .github/workflows/agent-router.yml
+          grep -Fx '      actions: write' .github/workflows/agent-router.yml >/dev/null
+          grep -F 'gh workflow run agent-builder-canary.yml' .github/workflows/agent-router.yml >/dev/null
+          grep -F "-f source='router-normal-v1'" .github/workflows/agent-router.yml >/dev/null
+          grep -F "if [ \"$classification\" != 'NORMAL' ]" .github/workflows/agent-router.yml >/dev/null
+          echo 'Operational Router workflow parses and retains deterministic NORMAL-only Builder dispatch.'
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
