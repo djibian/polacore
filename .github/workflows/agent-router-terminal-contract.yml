@@ -1,0 +1,104 @@
+name: PolaCore Router Terminal Decision Contract
+
+on:
+  pull_request:
+    branches: [engineering]
+    paths:
+      - 'scripts/agent_router_validate.py'
+      - '.github/workflows/agent-real-task-v1-failure.yml'
+      - '.github/workflows/agent-router-terminal-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate Router terminal-decision authority and failure recorder
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e "require 'psych'; ARGV.each { |p| Psych.parse_file(p) }" \
+            .github/workflows/agent-real-task-v1-failure.yml \
+            .github/workflows/agent-router-terminal-contract.yml
+          python3 -m py_compile scripts/agent_router_validate.py
+
+          python3 - <<'PY'
+          import json, pathlib, subprocess, tempfile
+
+          validator='scripts/agent_router_validate.py'
+          good={
+              'classification':'NORMAL',
+              'confidence':0.91,
+              'rationale':'Synthetic routine task decision with enough rationale for deterministic Router validation.'
+          }
+
+          def event(text):
+              return json.dumps({'type':'text','part':{'text':text}})+'\n'
+
+          def run(text, expect_ok):
+              with tempfile.TemporaryDirectory() as d:
+                  inp=pathlib.Path(d)/'in.jsonl'
+                  out=pathlib.Path(d)/'out.json'
+                  inp.write_text(event(text),encoding='utf-8')
+                  p=subprocess.run(['python3',validator,str(inp),str(out)],capture_output=True,text=True)
+                  if expect_ok:
+                      assert p.returncode==0,(p.stdout,p.stderr)
+                      parsed=json.loads(out.read_text(encoding='utf-8'))
+                      assert parsed['classification']=='NORMAL',parsed
+                      assert parsed['state_label']=='agent:ready-for-build',parsed
+                      assert parsed['risk_label']=='risk:normal',parsed
+                  else:
+                      assert p.returncode!=0,(p.stdout,p.stderr)
+
+          terminal=json.dumps(good,separators=(',',':'))
+          run(terminal, True)
+          run('Non-authoritative routing narration.\n'+terminal, True)
+          run('Earlier {"classification":"BLOCKED"} decision.\n'+terminal, False)
+          bad=dict(good); bad['merge_authorized']=True
+          run(json.dumps(bad,separators=(',',':')), False)
+          run(terminal+'\ntrailing prose', False)
+          low=dict(good); low['confidence']=0.4
+          run(json.dumps(low,separators=(',',':')), False)
+          print('Router terminal decision contract verified.')
+          PY
+
+          grep -F "workflows: ['PolaCore Real Task v1']" .github/workflows/agent-real-task-v1-failure.yml >/dev/null
+          grep -F "github.event.workflow_run.event == 'issues'" .github/workflows/agent-real-task-v1-failure.yml >/dev/null
+          grep -F "github.event.workflow_run.conclusion != 'success'" .github/workflows/agent-real-task-v1-failure.yml >/dev/null
+          grep -F "'agent:route-3d' not in labels" .github/workflows/agent-real-task-v1-failure.yml >/dev/null
+          grep -F "--add-label 'agent:blocked' --add-label 'risk:unknown'" .github/workflows/agent-real-task-v1-failure.yml >/dev/null
+          if grep -F 'ALBERT_API_KEY' .github/workflows/agent-real-task-v1-failure.yml >/dev/null; then
+            echo 'failure recorder must never receive Albert secret' >&2
+            exit 1
+          fi
+          if grep -F 'contents: write' .github/workflows/agent-real-task-v1-failure.yml >/dev/null; then
+            echo 'failure recorder must not write repository contents' >&2
+            exit 1
+          fi
+
+          ruby - <<'RUBY' > /tmp/bash-blocks
+          require 'psych'
+          ARGV.each do |workflow|
+            y=Psych.safe_load_file(workflow, aliases: true)
+            i=0
+            y.fetch('jobs').each do |_job_name, job|
+              (job['steps'] || []).each do |step|
+                next unless step['shell'] == 'bash' && step['run']
+                i += 1
+                path="/tmp/#{File.basename(workflow)}-#{i}.sh"
+                File.write(path, step['run'])
+                puts path
+              end
+            end
+          end
+          RUBY
+          while IFS= read -r script; do bash -n "$script"; done < /tmp/bash-blocks
+          echo 'Router terminal/failure contract passed.'
