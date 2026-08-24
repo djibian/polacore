@@ -75,7 +75,25 @@ jobs:
           fi
 
           python3 -m py_compile scripts/agent_router_validate.py scripts/agent_reviewer_validate.py
-          echo 'CI/Reviewer workflow structure and authority boundaries verified.'
+
+          ruby -e "require 'psych'; y=Psych.safe_load_file(ARGV[0], aliases: true); step=y.fetch('jobs').fetch('finalize').fetch('steps').find { |s| s['id'] == 'final' }; File.write('/tmp/finalizer.sh', step.fetch('run'))" .github/workflows/agent-router.yml
+          bash -n /tmp/finalizer.sh
+          cat > /tmp/reviewer-decision.json <<'EOF'
+          {"verdict":"READY_FOR_HUMAN","confidence":0.95,"rationale":"Synthetic validated Reviewer decision for deterministic finalizer contract execution."}
+          EOF
+          decision_b64="$(base64 -w0 /tmp/reviewer-decision.json)"
+          : > /tmp/finalizer-output
+          CI_JOB_RESULT=success \
+            CI_RESULT=PASS \
+            REVIEWER_JOB_RESULT=success \
+            REVIEW_DECISION_B64="$decision_b64" \
+            GITHUB_OUTPUT=/tmp/finalizer-output \
+            bash /tmp/finalizer.sh
+          grep -Fx 'state_label=agent:ready-for-human' /tmp/finalizer-output >/dev/null
+          grep -Fx 'verdict=READY_FOR_HUMAN' /tmp/finalizer-output >/dev/null
+          grep -Fx 'confidence=0.95' /tmp/finalizer-output >/dev/null
+          grep -Fx 'ci_passed=true' /tmp/finalizer-output >/dev/null
+          echo 'CI/Reviewer workflow structure, authority boundaries, and finalizer handoff verified.'
 
   reviewer-contract:
     if: github.event.pull_request.head.repo.full_name == github.repository
