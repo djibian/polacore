@@ -1,3 +1,4 @@
+# Temporary staging workflow; removed after verified blob promotion.
 name: PolaCore 3D Router Link Stage
 
 on:
