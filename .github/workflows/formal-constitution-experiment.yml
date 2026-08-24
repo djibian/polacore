@@ -28,9 +28,10 @@ jobs:
     timeout-minutes: 10
     env:
       VERUS_VERSION: '0.2026.08.15.7d4628a'
+      VERUS_RUST_TOOLCHAIN: '1.97.1-x86_64-unknown-linux-gnu'
     steps:
       - name: Checkout PolaCore
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -47,12 +48,19 @@ jobs:
           unzip -q /tmp/verus.zip -d /tmp
           test -x /tmp/verus-x86-linux/verus
 
+      - name: Install verifier-required Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$VERUS_RUST_TOOLCHAIN" --profile minimal
+
       - name: Record verifier and runner environment
         shell: bash
         run: |
           set -euo pipefail
           uname -a
           rustup --version
+          rustup run "$VERUS_RUST_TOOLCHAIN" rustc --version
           /tmp/verus-x86-linux/verus --version
 
       - name: Mechanically verify candidate constitution
