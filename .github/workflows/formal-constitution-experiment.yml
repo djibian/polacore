@@ -63,3 +63,23 @@ jobs:
             experiments/formal-constitution/constitution.rs \
             --expand-errors
           echo 'VERIFIED_BY_CI candidate constitution obligations discharged.'
+
+      - name: Require rejection of a deliberately broken gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 experiments/formal-constitution/make_negative_control.py /tmp/constitution-broken.rs
+
+          set +e
+          /tmp/verus-x86-linux/verus /tmp/constitution-broken.rs --expand-errors \
+            > /tmp/negative-control.log 2>&1
+          status=$?
+          set -e
+
+          cat /tmp/negative-control.log
+          if [ "$status" -eq 0 ]; then
+            echo 'REFUTED: Verus accepted the deliberately unconstitutional implementation.' >&2
+            exit 1
+          fi
+
+          echo 'VERIFIED_BY_CI negative control: verifier rejected removed constitutional mediation.'
