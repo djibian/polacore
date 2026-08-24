@@ -65,7 +65,7 @@ jobs:
           set -euo pipefail
           opencode run \
             --agent smoke \
-            --model albert/DeepSeek-V4-Flash \
+            --model albert/deepseek-ai/DeepSeek-V4-Flash \
             --format json \
             "Perform the PolaCore infrastructure smoke check exactly as defined by your agent instructions." \
             | tee /tmp/polacore-agent-smoke.jsonl
