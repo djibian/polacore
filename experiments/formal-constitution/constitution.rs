@@ -1,3 +1,11 @@
+// V0_PEDAGOGICAL_COUNTEREXAMPLE
+//
+// This file is intentionally retained as a mechanically verified but
+// specification-insufficient model. It demonstrates that a green proof is not
+// enough when authority facts themselves are supplied by an attacker. Do not
+// use this file as the candidate PolaCore authorization boundary. The corrected
+// trusted-state direction is `capability_kernel.rs`.
+
 use vstd::prelude::*;
 
 fn main() {}
@@ -22,8 +30,10 @@ spec fn state_invariant(admin: bool, current_epoch: u64) -> bool {
     admin ==> current_epoch > 0
 }
 
-// UNTRUSTED_BOUNDARY: this function intentionally has no `requires` clause.
-// A caller may supply any values. The function must fail closed by construction.
+// UNTRUSTED_BOUNDARY: this v0 boundary intentionally accepts all authority
+// facts from the caller. Verus proves the stated relation, but that relation is
+// too weak for a hostile PolaCore boundary because the caller can assert that
+// constitutional/capability authority exists.
 fn authorize(
     constitution: bool,
     site_policy: bool,
@@ -52,9 +62,8 @@ fn authorize(
         && current_epoch > 0
 }
 
-// UNTRUSTED_BOUNDARY: no caller precondition is trusted here either.
-// `admin_before` models trusted kernel state supplied by the kernel itself;
-// all remaining values model an adversarial request/configuration surface.
+// UNTRUSTED_BOUNDARY: retained to show why proving one mediated path does not
+// establish whole-system complete mediation when its authority facts are hostile.
 fn mediate_admin_transition(
     admin_before: bool,
     wants_admin: bool,
