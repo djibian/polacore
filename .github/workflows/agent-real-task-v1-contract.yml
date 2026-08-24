@@ -449,6 +449,7 @@ jobs:
 
   reviewer-contract:
     needs: final-contract
+    if: always() && needs.final-contract.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     permissions:
