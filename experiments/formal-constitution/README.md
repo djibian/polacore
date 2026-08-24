@@ -2,126 +2,158 @@
 
 Status: `HYPOTHESIS / EXPERIMENTAL`
 
-Issue: #27
+Issue: #27 — draft PR #28
 
 This directory tests one narrow question before PolaCore changes its long-term security ambition:
 
-> Can a small, mechanically verified security kernel accept fully hostile caller inputs while preserving useful constitutional security properties without forcing formal verification across the whole CMS?
+> Can a small, mechanically verified security kernel accept hostile requests while preserving useful constitutional security properties without forcing formal verification across the whole CMS?
 
-This is not production code and does not change the authoritative security invariant registry.
+This is not production code and does not change the authoritative P37-P121 security-invariant registry.
 
-## Why this experiment exists
+## Current result
 
-PolaCore already assumes that third-party component code can be fully compromised and already prefers explicit capabilities, narrow authority, fail-closed behavior, and a small trusted computing base. Formal verification is useful only if it strengthens that architecture without creating a larger or less understandable trust boundary.
+The experiment has produced an important positive **and** negative result.
 
-The decisive integration risk is the boundary between verified and unverified code. A proof that relies on an unverified caller honoring a verifier-only precondition is not an acceptable PolaCore boundary. Therefore the two executable boundary functions in `constitution.rs` intentionally have no `requires` clauses and validate attacker-controlled request values internally.
+### v0 — mechanically verified, security model insufficient
 
-## Model v0
+`constitution.rs` verifies successfully, but its useful security claim was falsified during review: constitutional permission and capability facts were themselves caller-supplied. A hostile caller could therefore assert `constitution=true` and suitable capability values.
 
-The first model deliberately stays tiny. It represents:
+This is intentionally retained as a counterexample showing that:
 
-- a constitutional allow/deny decision;
-- a site-local allow/deny decision;
-- an explicit capability presence bit;
-- a capability epoch, modeling revocation/staleness;
-- a minimal privileged state transition: acquiring administrator state.
+> A valid proof of a weak or incorrectly trusted specification does not establish the desired security property.
 
-It is intentionally not yet a complete capability system, identity model, secret service, plugin sandbox, or CMS authorization engine.
+The v0 model is **not** a candidate PolaCore authorization boundary.
 
-## Properties currently targeted
+### v1 — trusted authority state, hostile request only
 
-### C1 — Constitutional supremacy
+`capability_kernel.rs` moves the authority roots into opaque private `KernelState`:
 
-If an operation is allowed, the constitution must allow it.
+- constitutional decision;
+- local site-policy decision;
+- issued grant presence and identifier;
+- grant subject, resource and action;
+- grant epoch and current revocation epoch.
 
-`final_allow -> constitution_allow`
+The hostile caller supplies only a `Request` containing:
 
-A site policy can therefore restrict authority but cannot turn a constitutionally forbidden action into an allowed one.
+- caller identity;
+- claimed capability identifier;
+- resource;
+- action.
 
-### C2 — No authority without explicit current capability
+`authorize_request` has no Verus `requires` clause and guarantees that its executable result equals an opaque authorization predicate derived from trusted kernel state.
 
-An operation can be allowed only when an explicit capability is present and its epoch matches the current epoch.
+On exact PR-head commit `f05df03a73fc608f90a1d07853b07a6305f283dc`, CI reported:
 
-This is a minimal model of revocation/staleness, not yet a proof that real capability objects are unforgeable.
+- v1 model: **8 verified, 0 errors**;
+- deliberately broken v1 with subject binding removed: **7 verified, 1 error** and rejection as required;
+- proof-hygiene scanner: passed for three named hostile boundaries;
+- exact checked-out SHA: matched the PR head;
+- Verus archive SHA-256: matched the repository-pinned digest.
 
-### C3 — Complete mediation for the modeled admin transition
+This evidence is meaningful but still narrow. It verifies the stated v1 model, not PolaCore as a whole.
 
-A transition from non-admin to admin can occur only after the boundary authorizer accepts the request.
+## Candidate properties demonstrated in the v1 model
 
-The public experimental boundary takes arbitrary hostile inputs and has no caller precondition.
+The current model mechanically supports these narrow statements over its trusted state and request semantics:
 
-### C4 — State-integrity preservation
+1. **Constitutional denial cannot be amplified by local policy.**
+2. **A forged capability identifier is denied.**
+3. **A capability cannot be reused by a different subject.**
+4. **A capability cannot be reused for a different resource.**
+5. **A capability cannot be reused for a different action.**
+6. **A stale grant epoch is denied.**
+7. **The executable boundary result refines the opaque authorization predicate.**
 
-If the trusted state satisfies the modeled invariant before the transition, the mediated transition preserves it.
+The model does **not** yet prove whole-system complete mediation: an equivalent privileged effect could still exist outside this modeled boundary in a future implementation. That is now the decisive feasibility question.
 
-The first invariant is intentionally small: administrator state is never valid at epoch zero.
+## Why the unverified/verified boundary matters
 
-## What a successful Verus run means
+A proof that relies on an unverified caller honoring a verifier-only precondition is not an acceptable PolaCore security boundary. For that reason, named hostile entry points are checked by CI to ensure they have no `requires` clause.
 
-A successful run means Verus mechanically discharged the stated proof obligations for this exact model and source revision, under the Verus toolchain's documented trusted assumptions.
-
-It does **not** mean:
-
-- PolaCore is formally verified;
-- the operating system, compiler, solver, hardware, database, browser, Wasmtime, or cryptographic assumptions are proven;
-- capabilities in a future runtime are already unforgeable;
-- unverified code is prevented from bypassing a future Authority Core deployment;
-- the model is complete or correctly captures every desired security property.
-
-Those boundaries remain `UNPROVEN` until separately demonstrated.
+The v0 failure exposed a second rule: hostile callers must not supply authority facts merely because the verifier can reason about them. Authority roots must come from state controlled by the trusted kernel.
 
 ## Proof-hygiene guard
 
-`check_proof_hygiene.py` rejects known proof-shortcut mechanisms in this experiment source, including `assume`, `admit`, axioms, external verification bypasses, and assumed specifications. It also rejects a verifier-only `requires` clause at either marked untrusted-call boundary.
+`check_proof_hygiene.py` scans all Rust/Verus sources in this experiment and rejects selected proof-shortcut mechanisms, including:
 
-This guard is deliberately narrow and is not proof that no specification bug exists. Reviewer and Adversary inspection remain required.
+- `assume`;
+- `admit`;
+- axioms;
+- `external_body` / verifier-external bypasses;
+- `assume_specification`.
 
-## Initial TCB / assumption manifest
+It also binds checks to the actual named hostile boundary functions rather than movable comment markers and rejects verifier-only `requires` clauses on them.
 
-| Layer | Initial classification | Reason |
+This is a CI guard, not a theorem that the specification is correct. Independent Adversary/Reviewer inspection remains mandatory.
+
+## Toolchain pinning and remaining supply-chain assumption
+
+The experiment currently pins:
+
+- Verus: `0.2026.08.15.7d4628a`;
+- Verus x86 Linux ZIP SHA-256: `0467d3dd832e29d301abdd83d60237f0299d0a0acba3041388af066c8b31d1e4`;
+- Rust toolchain required by that Verus build: `1.97.1-x86_64-unknown-linux-gnu`;
+- GitHub runner family: Ubuntu 24.04;
+- `actions/checkout` by commit SHA.
+
+The Verus digest was established once from the upstream release download and is now checked on every run. This prevents unnoticed later substitution under the same release URL, but the initial digest observation remains a **trust-on-first-use assumption**, not independently authenticated provenance.
+
+## TCB / assumption manifest
+
+| Layer | Current classification | Notes |
 | --- | --- | --- |
-| `constitution.rs` stated obligations | mechanically checked when Verus CI passes | exact experiment source |
-| Rust/Verus boundary shape | structural + mechanically checked obligations | hostile request values are validated internally |
-| proof-hygiene scanner | CI guard, not a theorem | detects selected shortcuts only |
-| Verus verifier / `vstd` | trusted assumption | verifier implementation is outside this experiment's proof |
-| SMT solver used by Verus | trusted assumption | solver correctness is outside this experiment |
-| Rust compiler / LLVM for future executable deployment | trusted assumption | executable refinement is not yet demonstrated here |
-| OS / process isolation / filesystem / database | `UNPROVEN` by this experiment | separate PolaCore invariants and runtime evidence |
-| Wasmtime / WebAssembly | `UNPROVEN` by this experiment | possible defense-in-depth only |
-| cryptographic hardness | conditional external assumption | requires algorithm agility rather than an eternal proof |
+| v1 stated Verus obligations | `FORMALLY_VERIFIED` for exact passing revision | only the stated model/code obligations |
+| v1 opaque trusted-state boundary | formal + structural experiment evidence | hostile request cannot directly set private authority fields through the modeled API |
+| v0 useful authority claim | `REFUTED` as sufficient model | retained as a proof/specification counterexample |
+| proof-hygiene scanner | CI guard | detects selected proof shortcuts/preconditions, not all specification defects |
+| Verus / `vstd` / SMT solver | trusted assumption | verifier and solver are outside the proof |
+| Rust compiler / LLVM for deployed executable | trusted assumption / future work | executable deployment and compiler refinement are not proved end-to-end |
+| initial Verus archive provenance | conditional TOFU assumption | subsequent byte substitution is detected by pinned SHA-256 |
+| OS / process isolation / filesystem / database | `UNPROVEN` by this experiment | must be supported by separate runtime/structural evidence |
+| whole-system privileged-effect mediation | `UNPROVEN` | decisive next experiment |
+| Wasmtime / WebAssembly | `UNPROVEN` here | possible defense-in-depth, not part of current theorem |
+| cryptographic hardness | conditional external assumption | requires crypto-agility rather than an eternal theorem |
 
-## Falsification plan
+## Constitutional governance lesson
 
-The next experiment increments should try to break the useful claim rather than enlarge the model automatically:
+Formal verification does not protect PolaCore if an agent can silently weaken the specification and then prove the weakened version. The experimental `CONSTITUTION_DRAFT.md` therefore treats the machine-readable constitution as a separate root of trust:
 
-1. attempt privilege amplification through local policy;
-2. attempt stale/replayed capability use;
-3. model cross-component resource authority;
-4. model a confused-deputy request;
-5. replace booleans with capability objects/tokens and test whether construction authority can be made non-forgeable at the API boundary;
-6. determine whether an unverified caller can bypass all privileged effects rather than merely call the verified authorizer correctly;
-7. measure proof/TCB growth as the model gains one realistic CMS operation.
+- ordinary implementation work must not silently amend it;
+- weakening a constitutional property must be an explicit constitutional amendment;
+- the old/new property, newly admitted threat and proof impact must be visible;
+- independent adversarial review and owner approval are required;
+- proof failure blocks the formal claim rather than justifying specification weakening.
 
-If useful properties require verification to spread across a large fraction of PolaCore, or if privileged effects remain bypassable outside the verified boundary, issue #27 must be classified `MODIFY` or `NO-GO` rather than weakening the constitution.
+This governance rule is especially important if future AI agents become much more capable than today's agents.
+
+## Decisive next feasibility gate
+
+The next experiment should stop proving more Boolean authorization facts and test the architectural boundary itself:
+
+> Can a realistic privileged PolaCore effect be made unreachable to untrusted code except through the small verified Authority Core?
+
+A useful next slice should include one concrete CMS operation, for example a publication/admin state change or a brokered sensitive-data operation, and demonstrate:
+
+1. the untrusted worker lacks direct database/filesystem/secret authority for that effect;
+2. the only exposed route is a narrow request protocol;
+3. trusted state constructs/looks up grants rather than trusting caller-supplied grant facts;
+4. the verified kernel decides the operation;
+5. a deliberately malicious worker cannot achieve the same effect through a second path;
+6. adding this realistic effect does not cause proof obligations to spread through a large fraction of the CMS.
+
+If this cannot be achieved, the constitution + small verified kernel hypothesis should be classified `MODIFY` or `NO-GO`, not rescued by weakening the claim.
 
 ## Reproduction
 
-CI pins a specific Verus weekly release instead of tracking a floating latest build. For the initial experiment the pin is:
+CI verifies the exact PR-head SHA and refuses to execute a Verus archive whose digest differs from the repository pin.
 
-`0.2026.08.15.7d4628a`
-
-The official Verus installation documentation lists Ubuntu 24.04 x86_64 as a prebuilt supported platform. The binary release contains the verifier, `vstd`, and solver needed for command-line verification.
-
-Run the hygiene guard first:
+Locally, after obtaining the pinned Verus archive and required Rust toolchain:
 
 ```sh
 python3 experiments/formal-constitution/check_proof_hygiene.py
-```
-
-Then, with the pinned Verus release unpacked:
-
-```sh
 /path/to/verus-x86-linux/verus experiments/formal-constitution/constitution.rs
+/path/to/verus-x86-linux/verus experiments/formal-constitution/capability_kernel.rs
 ```
 
-Until that exact verification succeeds in repository CI, all formal claims in this directory remain `UNPROVEN`.
+The current long-term PolaCore ambition remains unchanged until issue #27 reaches an explicit `GO / MODIFY / NO-GO` conclusion.
