@@ -29,22 +29,33 @@ jobs:
     env:
       VERUS_VERSION: '0.2026.08.15.7d4628a'
       VERUS_RUST_TOOLCHAIN: '1.97.1-x86_64-unknown-linux-gnu'
+      TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
-      - name: Checkout PolaCore
+      - name: Checkout exact experiment revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.TARGET_SHA }}
           persist-credentials: false
+
+      - name: Require exact checked-out revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          printf 'expected_sha=%s\nactual_sha=%s\n' "$TARGET_SHA" "$actual"
+          test "$actual" = "$TARGET_SHA"
 
       - name: Reject proof shortcuts and caller preconditions
         run: python3 experiments/formal-constitution/check_proof_hygiene.py
 
-      - name: Download pinned Verus release
+      - name: Download pinned Verus release and record digest
         shell: bash
         run: |
           set -euo pipefail
           url="https://github.com/verus-lang/verus/releases/download/release%2F${VERUS_VERSION}/verus-${VERUS_VERSION}-x86-linux.zip"
           curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
             --retry 3 --output /tmp/verus.zip "$url"
+          sha256sum /tmp/verus.zip
           unzip -q /tmp/verus.zip -d /tmp
           test -x /tmp/verus-x86-linux/verus
 
