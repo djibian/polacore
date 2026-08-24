@@ -1,0 +1,151 @@
+name: PolaCore CI Canary
+
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        description: 'Owner-authored NORMAL issue built by the bounded Builder canary'
+        required: true
+        type: string
+      source:
+        description: 'Trusted caller marker'
+        required: true
+        type: string
+    outputs:
+      ci_result:
+        description: 'PASS only after all deterministic canary CI checks succeed'
+        value: ${{ jobs.verify.outputs.ci_result }}
+      pr_number:
+        description: 'Bound Builder PR number'
+        value: ${{ jobs.verify.outputs.pr_number }}
+      pr_url:
+        description: 'Bound Builder PR URL'
+        value: ${{ jobs.verify.outputs.pr_url }}
+      head_sha:
+        description: 'Exact reviewed Builder commit SHA'
+        value: ${{ jobs.verify.outputs.head_sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      ci_result: ${{ steps.result.outputs.ci_result }}
+      pr_number: ${{ steps.bind.outputs.pr_number }}
+      pr_url: ${{ steps.bind.outputs.pr_url }}
+      head_sha: ${{ steps.bind.outputs.head_sha }}
+    steps:
+      - name: Bind exact Builder branch, PR and issue state
+        id: bind
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          SOURCE: ${{ inputs.source }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SOURCE" = 'router-ci-reviewer-v1' || { echo 'untrusted CI caller source' >&2; exit 1; }
+          [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo 'invalid issue number' >&2; exit 1; }
+
+          branch="agent/builder-canary-${ISSUE_NUMBER}-${GITHUB_RUN_ID}"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" > /tmp/ci-issue.json
+          gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --head "$branch" \
+            --json number,url,title,baseRefName,headRefName,headRefOid \
+            --limit 2 > /tmp/ci-prs.json
+
+          python3 - <<'PY'
+          import json, os, re
+          issue=json.load(open('/tmp/ci-issue.json', encoding='utf-8'))
+          prs=json.load(open('/tmp/ci-prs.json', encoding='utf-8'))
+          n=os.environ['ISSUE_NUMBER']
+          owner=os.environ['GITHUB_REPOSITORY_OWNER']
+          branch=f"agent/builder-canary-{n}-{os.environ['GITHUB_RUN_ID']}"
+          if issue.get('state') != 'open':
+              raise SystemExit('CI canary requires an open source issue')
+          if ((issue.get('user') or {}).get('login')) != owner:
+              raise SystemExit('CI canary requires an owner-authored source issue')
+          labels={x.get('name') for x in issue.get('labels', [])}
+          required={'agent:ready-for-build','risk:normal'}
+          if not required <= labels:
+              raise SystemExit(f'CI canary requires labels {sorted(required)}; got {sorted(labels)}')
+          if len(prs) != 1:
+              raise SystemExit(f'expected exactly one open Builder PR for {branch}; got {len(prs)}')
+          pr=prs[0]
+          if pr.get('title') != f'[Agent canary] Bounded Builder output for #{n}':
+              raise SystemExit('unexpected Builder PR title')
+          if pr.get('baseRefName') != 'engineering' or pr.get('headRefName') != branch:
+              raise SystemExit('Builder PR base/head binding mismatch')
+          if not re.fullmatch(r'[0-9a-f]{40}', str(pr.get('headRefOid') or '')):
+              raise SystemExit('invalid Builder head SHA')
+          PY
+
+          pr_number="$(python3 -c "import json; print(json.load(open('/tmp/ci-prs.json'))[0]['number'])")"
+          pr_url="$(python3 -c "import json; print(json.load(open('/tmp/ci-prs.json'))[0]['url'])")"
+          head_sha="$(python3 -c "import json; print(json.load(open('/tmp/ci-prs.json'))[0]['headRefOid'])")"
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+          echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/files?per_page=100" > /tmp/ci-files.json
+          python3 - <<'PY'
+          import json, os
+          files=json.load(open('/tmp/ci-files.json', encoding='utf-8'))
+          n=os.environ['ISSUE_NUMBER']
+          if len(files) != 1:
+              raise SystemExit(f'CI canary expected exactly one changed file; got {len(files)}')
+          f=files[0]
+          if f.get('filename') != 'docs/automation/BUILDER_CANARY.md':
+              raise SystemExit(f"CI canary rejected changed path {f.get('filename')!r}")
+          patch=str(f.get('patch') or '')
+          if '-Canary status: BASELINE' not in patch or f'+Canary status: BUILT_FOR_ISSUE_{n}' not in patch:
+              raise SystemExit('CI canary rejected unexpected documentation patch')
+          PY
+
+      - name: Checkout exact Builder SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.bind.outputs.head_sha }}
+          persist-credentials: false
+
+      - name: Verify exact reviewed bytes and automation contracts
+        env:
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          HEAD_SHA: ${{ steps.bind.outputs.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA" || { echo 'checkout SHA mismatch' >&2; exit 1; }
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          n=os.environ['ISSUE_NUMBER']
+          expected=(
+              '# Builder canary\n\n'
+              'This file is reserved for proving bounded autonomous Builder behavior in GitHub Actions.\n\n'
+              f'Canary status: BUILT_FOR_ISSUE_{n}\n'
+          )
+          actual=Path('docs/automation/BUILDER_CANARY.md').read_text(encoding='utf-8')
+          if actual != expected:
+              raise SystemExit('CI canary rejected unexpected reviewed bytes')
+          PY
+          python3 -m py_compile scripts/agent_router_validate.py scripts/agent_reviewer_validate.py
+          ruby -e "require 'psych'; ARGV.each { |p| Psych.parse_file(p) }" \
+            .github/workflows/agent-router.yml \
+            .github/workflows/agent-builder-canary.yml \
+            .github/workflows/agent-ci-canary.yml \
+            .github/workflows/agent-reviewer-canary.yml
+
+      - name: Export deterministic CI result
+        id: result
+        shell: bash
+        run: echo 'ci_result=PASS' >> "$GITHUB_OUTPUT"
