@@ -53,6 +53,15 @@ jobs:
             exit 1
           fi
 
+      - name: List authorized Albert model IDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${ALBERT_API_KEY}" \
+            https://albert.api.etalab.gouv.fr/v1/models \
+            | python3 -c 'import json,sys; payload=json.load(sys.stdin); ids=sorted(str(x.get("id")) for x in payload.get("data",[]) if x.get("id")); print("Authorized Albert model IDs:"); print("\n".join(ids))'
+
       - name: Install pinned OpenCode
         run: npm install --global opencode-ai@1.18.21
 
