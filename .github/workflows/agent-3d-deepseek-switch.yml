@@ -11,20 +11,20 @@ permissions:
   contents: read
 
 jobs:
-  switch-model:
+  stage-transformed-blobs:
     if: github.event.pull_request.number == 37 && github.event.pull_request.head.repo.full_name == github.repository && github.actor == github.repository_owner
     runs-on: ubuntu-24.04
     timeout-minutes: 6
     permissions:
       contents: write
     steps:
-      - name: Checkout exact PR head for deterministic transformation
+      - name: Checkout exact PR head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 1
 
-      - name: Replace only expected 3D model references and self-remove
+      - name: Generate only verified DeepSeek copies under agent-staging
         shell: bash
         run: |
           set -euo pipefail
@@ -32,37 +32,35 @@ jobs:
           from pathlib import Path
           old='albert/qwen3-coder-30b-A3b-instruct'
           new='albert/deepseek-v4-flash'
-          expected={
-              '.github/workflows/agent-real-task-v1.yml': 4,
-              '.github/workflows/agent-real-task-v1-contract.yml': 3,
-              '.opencode/agents/builder-task-3d.md': 1,
-              '.opencode/agents/reviewer-task-3d.md': 1,
+          sources={
+              '.github/workflows/agent-real-task-v1.yml': ('agent-staging/3d-model-switch/agent-real-task-v1.yml',4),
+              '.github/workflows/agent-real-task-v1-contract.yml': ('agent-staging/3d-model-switch/agent-real-task-v1-contract.yml',3),
+              '.opencode/agents/builder-task-3d.md': ('agent-staging/3d-model-switch/builder-task-3d.md',1),
+              '.opencode/agents/reviewer-task-3d.md': ('agent-staging/3d-model-switch/reviewer-task-3d.md',1),
           }
-          for path,count in expected.items():
-              p=Path(path)
-              text=p.read_text(encoding='utf-8')
+          for src,(dst,count) in sources.items():
+              text=Path(src).read_text(encoding='utf-8')
               actual=text.count(old)
               if actual != count:
-                  raise SystemExit(f'{path}: expected {count} Qwen references, found {actual}')
+                  raise SystemExit(f'{src}: expected {count} Qwen references, found {actual}')
               updated=text.replace(old,new)
-              if old in updated:
-                  raise SystemExit(f'{path}: stale Qwen reference remains')
-              p.write_text(updated,encoding='utf-8')
+              if old in updated or updated.count(new) < count:
+                  raise SystemExit(f'{src}: model transformation failed closed')
+              p=Path(dst); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(updated,encoding='utf-8')
           PY
-          git rm .github/workflows/agent-3d-deepseek-switch.yml
-          changed="$(git diff HEAD --name-only | sort)"
-          expected="$(printf '%s\n' \
-            '.github/workflows/agent-3d-deepseek-switch.yml' \
-            '.github/workflows/agent-real-task-v1-contract.yml' \
-            '.github/workflows/agent-real-task-v1.yml' \
-            '.opencode/agents/builder-task-3d.md' \
-            '.opencode/agents/reviewer-task-3d.md' | sort)"
-          test "$changed" = "$expected" || { printf 'unexpected transformation paths:\n%s\n' "$changed" >&2; exit 1; }
           ruby -e "require 'psych'; ARGV.each { |p| Psych.parse_file(p) }" \
-            .github/workflows/agent-real-task-v1.yml \
-            .github/workflows/agent-real-task-v1-contract.yml
+            agent-staging/3d-model-switch/agent-real-task-v1.yml \
+            agent-staging/3d-model-switch/agent-real-task-v1-contract.yml
+          test "$(find agent-staging/3d-model-switch -type f | wc -l)" -eq 4
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/workflows/agent-real-task-v1.yml .github/workflows/agent-real-task-v1-contract.yml .opencode/agents/builder-task-3d.md .opencode/agents/reviewer-task-3d.md
-          git commit -m 'infra: use validated DeepSeek model for real task v1'
+          git add agent-staging/3d-model-switch
+          staged="$(git diff --cached --name-only | sort)"
+          expected="$(printf '%s\n' \
+            'agent-staging/3d-model-switch/agent-real-task-v1-contract.yml' \
+            'agent-staging/3d-model-switch/agent-real-task-v1.yml' \
+            'agent-staging/3d-model-switch/builder-task-3d.md' \
+            'agent-staging/3d-model-switch/reviewer-task-3d.md' | sort)"
+          test "$staged" = "$expected" || { printf 'unexpected staged paths:\n%s\n' "$staged" >&2; exit 1; }
+          git commit -m 'test: stage DeepSeek 3D model-switch blobs'
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
