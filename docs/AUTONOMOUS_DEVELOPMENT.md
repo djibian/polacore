@@ -1,8 +1,16 @@
-# Autonomous development model
+# Autonomous development: current state and target
+
+## Current demonstrated state
+
+PolaCore does not yet have the generalized autonomous system described below. The retained Canary, Real Task v1 and A0 workflows are evidence-bearing pilots from issues #36 and #46. They demonstrate bounded mechanics, not a reusable end-to-end control plane.
+
+Issues #47 and #48 own construction of the target platform and its deterministic Merge Governor. Until #48 produces accepted exact-SHA evidence, no agent may infer that a trusted Governor exists or that pilot success authorizes generalized autonomous integration. `engineering` remains the integration branch, but integration uses only the controls actually present and accepted in the repository.
+
+## Target model
 
 ## Purpose and sources of truth
 
-PolaCore is developed by an autonomous GitHub-native system whose owner sets product objectives and performs only real-world tests or genuine product/constitutional decisions. GitHub issues, pull requests, exact commits, tests and versioned evidence are shared memory. Chat history and scheduled-task prompts are not authoritative project state.
+PolaCore is to be developed by a generalized autonomous GitHub-native system whose owner sets product objectives and performs only real-world tests or genuine product/constitutional decisions. GitHub issues, pull requests, exact commits, tests and versioned evidence are shared memory. Chat history and scheduled-task prompts are not authoritative project state.
 
 Every actor reads `AGENTS.md`, the active issue, relevant product/security documents, the exact candidate diff and current CI evidence before acting.
 
@@ -58,7 +66,7 @@ Authority kernel, broker, secrets, publication, capabilities, proof obligations 
 
 A change that weakens or replaces a product objective, security constitution or invariant. Agents may prepare evidence and a complete proposal but only Emmanuel may approve it.
 
-## Normal state flow
+## Target state flow
 
 1. Lead selects or refines one bounded issue and computes its assurance floor.
 2. Lab resolves fundamental uncertainty when required.
