@@ -53,10 +53,11 @@ The Governor then requires certificate/observation equality.
 
 ## Remaining boundary
 
-This lot does not fetch GitHub, execute checks, validate model output, store an
-artifact, hold merge authority, perform compare-and-swap or write the post-merge
-audit record. Those capabilities remain separate and `UNPROVEN` until later
-issue #48 lots.
+This component does not fetch GitHub, execute checks, validate model output,
+hold merge authority, perform compare-and-swap or write the post-merge audit
+record. `MERGE_BUNDLE.md` defines how its output is bound to an independently
+collected observation, decision and non-authoritative intent. The live
+capabilities remain separate and `UNPROVEN` until later issue #48 lots.
 
 Run the combined contract with:
 

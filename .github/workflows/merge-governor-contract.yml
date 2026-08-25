@@ -6,13 +6,16 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'config/merge_governor_policy_v1.json'
+      - 'docs/automation/MERGE_BUNDLE.md'
       - 'docs/automation/MERGE_CERTIFICATE.md'
       - 'docs/automation/MERGE_GOVERNOR.md'
       - 'docs/automation/MERGE_OBSERVATION.md'
       - 'scripts/merge_certificate_build.py'
+      - 'scripts/merge_decision_bundle.py'
       - 'scripts/merge_governor.py'
       - 'scripts/merge_observation_collect.py'
       - 'tests/test_merge_certificate_build.py'
+      - 'tests/test_merge_decision_bundle.py'
       - 'tests/test_merge_governor.py'
       - 'tests/test_merge_observation_collect.py'
       - '.github/workflows/merge-governor-contract.yml'
@@ -20,13 +23,16 @@ on:
     branches: [engineering]
     paths:
       - 'config/merge_governor_policy_v1.json'
+      - 'docs/automation/MERGE_BUNDLE.md'
       - 'docs/automation/MERGE_CERTIFICATE.md'
       - 'docs/automation/MERGE_GOVERNOR.md'
       - 'docs/automation/MERGE_OBSERVATION.md'
       - 'scripts/merge_certificate_build.py'
+      - 'scripts/merge_decision_bundle.py'
       - 'scripts/merge_governor.py'
       - 'scripts/merge_observation_collect.py'
       - 'tests/test_merge_certificate_build.py'
+      - 'tests/test_merge_decision_bundle.py'
       - 'tests/test_merge_governor.py'
       - 'tests/test_merge_observation_collect.py'
       - '.github/workflows/merge-governor-contract.yml'
@@ -54,9 +60,11 @@ jobs:
           python3 -m json.tool config/merge_governor_policy_v1.json >/dev/null
           python3 -m py_compile \
             scripts/merge_certificate_build.py \
+            scripts/merge_decision_bundle.py \
             scripts/merge_governor.py \
             scripts/merge_observation_collect.py \
             tests/test_merge_certificate_build.py \
+            tests/test_merge_decision_bundle.py \
             tests/test_merge_governor.py \
             tests/test_merge_observation_collect.py
 
@@ -66,7 +74,8 @@ jobs:
           python3 -m unittest -v \
             tests/test_merge_governor.py \
             tests/test_merge_observation_collect.py \
-            tests/test_merge_certificate_build.py
+            tests/test_merge_certificate_build.py \
+            tests/test_merge_decision_bundle.py
 
       - name: Prove the candidate contract has no publication authority
         shell: bash

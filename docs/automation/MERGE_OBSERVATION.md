@@ -21,7 +21,7 @@ collector.
 - PR titles, bodies, comments, labels and approvals are not merge evidence.
 - Candidate files are never executed by the collector.
 
-The snapshot binds the open PR/base/head, current `engineering`, both exact commit
+The snapshot binds the PR/base/head, current `engineering`, both exact commit
 trees, the complete PR file page, workflow runs and jobs, reviews and review
 threads. Unknown top-level keys and incomplete pages fail closed.
 
@@ -51,12 +51,25 @@ The trusted workflow must make a Reviewer/Adversary job succeed only after its
 read-only model output has passed the deterministic verdict validator. A green
 arbitrary candidate workflow is never evidence.
 
+## Replay record
+
+An open PR must not carry a replay record. For a closed merged PR, the collector
+requires a separate trusted record containing the exact candidate head, GitHub
+merge commit and certificate digest. GitHub's merge commit must match the record.
+The resulting `MERGED` observation lets the Governor return `ALREADY_MERGED`
+without unrealistically requiring a closed PR to remain mergeable.
+
+The record is not accepted from PR text, labels or candidate artifacts. Its
+authenticated live source and durable storage remain part of the future
+controller boundary.
+
 ## Remaining boundary
 
 The collector itself does not fetch live GitHub data, generate a certificate,
-hold merge authority, support post-merge replay collection, or perform the final
-pre-merge compare-and-swap. Certificate construction is a separate offline
-contract; the remaining live boundaries stay `UNPROVEN` until later #48 lots.
+hold merge authority, establish the replay record's trusted source, or perform
+the final pre-merge compare-and-swap. Certificate construction and bundle
+assembly are separate offline contracts; the live boundaries stay `UNPROVEN`
+until later #48 lots.
 
 Run the combined contract with:
 
