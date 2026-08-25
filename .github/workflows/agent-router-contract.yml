@@ -54,7 +54,12 @@ jobs:
           grep -F 'uses: ./.github/workflows/agent-builder-canary.yml' .github/workflows/agent-router.yml >/dev/null
           grep -F 'source: router-normal-v2' .github/workflows/agent-router.yml >/dev/null
           grep -F 'ALBERT_API_KEY:' .github/workflows/agent-router.yml >/dev/null
-          echo 'Operational Router parses and retains NORMAL-only reusable Builder invocation without actions:write.'
+          grep -F -- '--model albert/deepseek-v4-flash' .github/workflows/agent-router.yml >/dev/null
+          if grep -F -- '--model albert/qwen3-coder-30b-A3b-instruct' .github/workflows/agent-router.yml >/dev/null; then
+            echo 'Operational Router must not depend on the exhausted Qwen quota' >&2
+            exit 1
+          fi
+          echo 'Operational Router parses, uses DeepSeek V4 Flash, and retains NORMAL-only reusable Builder invocation without actions:write.'
 
       - name: Verify runner Node.js toolchain
         shell: bash
@@ -91,13 +96,13 @@ jobs:
       - name: Install pinned OpenCode
         run: npm install --global opencode-ai@1.18.21
 
-      - name: Run Router NORMAL contract
+      - name: Run DeepSeek Router NORMAL contract
         shell: bash
         run: |
           set -euo pipefail
           opencode run \
             --agent router \
-            --model albert/qwen3-coder-30b-A3b-instruct \
+            --model albert/deepseek-v4-flash \
             --format json \
             'Route only the target issue in agent-input/router-context.md. Return the exact Router JSON contract and nothing else.' \
             | tee /tmp/router-selftest.jsonl
@@ -108,7 +113,8 @@ jobs:
           assert d['classification'] == 'NORMAL', d
           assert d['state_label'] == 'agent:ready-for-build', d
           assert d['risk_label'] == 'risk:normal', d
-          print('Router NORMAL contract verified.')
+          assert len(d['rationale']) <= 600, len(d['rationale'])
+          print('DeepSeek Router NORMAL contract verified.')
           PY
 
       - name: Prove malformed output is rejected
