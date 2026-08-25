@@ -183,7 +183,7 @@ jobs:
           set -euo pipefail
           opencode run \
             --agent reviewer-canary \
-            --model albert/qwen3-coder-30b-A3b-instruct \
+            --model albert/deepseek-v4-flash \
             --format json \
             'Review only the bounded PR evidence in agent-input/reviewer-context.md. Return the exact Reviewer JSON contract and nothing else.' \
             | tee /tmp/reviewer.jsonl
