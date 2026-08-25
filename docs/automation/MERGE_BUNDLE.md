@@ -43,7 +43,8 @@ The future privileged controller must load the verifier and policy from the
 protected `engineering` base, verify the bundle, fetch fresh authenticated
 GitHub state, compare the exact PR head and current base, respect branch
 protection, and record the resulting merge tuple. It must not check out or
-execute candidate code while holding write authority.
+execute candidate code while holding write authority. The pure controller
+protocol and its atomicity obligations are specified in `MERGE_CONTROLLER.md`.
 
 ## Replay boundary
 
@@ -53,10 +54,10 @@ requires that record to agree with GitHub before the Governor can return
 `ALREADY_MERGED`. PR bodies, comments, labels and candidate artifacts are not a
 trusted record source.
 
-This lot deliberately does not define the live record store, GitHub permission
-grant, privileged workflow or merge API adapter. Those authority-bearing
-elements remain `UNPROVEN` and must be introduced separately without changing
-this candidate's own judge to accept itself.
+The bundle does not define the live record store, GitHub permission grant,
+privileged workflow or merge API adapter. Those authority-bearing elements
+remain `UNPROVEN` and must be introduced separately without changing a
+candidate's own judge to accept itself.
 
 Run the complete offline contract with:
 
