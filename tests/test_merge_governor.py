@@ -32,6 +32,7 @@ def fixture() -> tuple[dict, dict, dict]:
             "name": "task-tests",
             "kind": "TEST",
             "workflow": "PolaCore Trusted Task Checks",
+            "workflow_path": ".github/workflows/trusted-task-checks.yml",
             "workflow_sha": BASE,
             "run_id": 7001,
             "job_id": 8001,
@@ -43,6 +44,7 @@ def fixture() -> tuple[dict, dict, dict]:
         {
             "role": "REVIEWER",
             "workflow": "PolaCore Task Reviewer",
+            "workflow_path": ".github/workflows/task-reviewer.yml",
             "workflow_sha": BASE,
             "run_id": 7002,
             "job_id": 8002,
@@ -142,6 +144,7 @@ class MergeGovernorContractTests(unittest.TestCase):
             "name": "security-tests",
             "kind": "SECURITY",
             "workflow": "PolaCore Trusted Security Checks",
+            "workflow_path": ".github/workflows/trusted-security-checks.yml",
             "workflow_sha": BASE,
             "run_id": 7003,
             "job_id": 8003,
@@ -155,6 +158,7 @@ class MergeGovernorContractTests(unittest.TestCase):
                 {
                     "role": role,
                     "workflow": f"PolaCore {role.title()}",
+                    "workflow_path": f".github/workflows/{role.lower()}.yml",
                     "workflow_sha": BASE,
                     "run_id": run_id,
                     "job_id": job_id,

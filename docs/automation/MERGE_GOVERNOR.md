@@ -34,6 +34,10 @@ All objects reject duplicate or unknown keys. The certificate and observation
 must agree byte-for-data on every candidate-bound field. Policy is bound by both
 version and canonical SHA-256 digest.
 
+The certificate is built by the offline trusted-base contract documented in
+`MERGE_CERTIFICATE.md`. Untrusted claims cannot select task authority, assurance
+or policy, and the exact workflow path is part of every check and verdict.
+
 ## Fail-closed rules
 
 The core returns `UNPROVEN` unless all of these are true:

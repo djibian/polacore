@@ -53,9 +53,10 @@ arbitrary candidate workflow is never evidence.
 
 ## Remaining boundary
 
-This lot does not fetch live GitHub data, generate a certificate, hold merge
-authority, support post-merge replay collection, or perform the final pre-merge
-compare-and-swap. Those remain `UNPROVEN` until later #48 lots.
+The collector itself does not fetch live GitHub data, generate a certificate,
+hold merge authority, support post-merge replay collection, or perform the final
+pre-merge compare-and-swap. Certificate construction is a separate offline
+contract; the remaining live boundaries stay `UNPROVEN` until later #48 lots.
 
 Run the combined contract with:
 
