@@ -1,5 +1,7 @@
 # PolaCore A0 Autonomous Maintenance
 
+> **Pilot status (2026-08-25):** A0 v1 was demonstrated only around completed issue #36. It is retained as failure-class and authority-separation evidence, not as the generalized maintenance engine. Issue #47 owns any successor; permissions and repair surface must not be broadened by inference.
+
 ## Purpose
 
 A0 maintenance reduces owner relay work for routine agent-infrastructure failures while keeping security, authority, and architecture decisions human-governed.
