@@ -1,6 +1,6 @@
 {
   "schema": "polacore.merge-governor-policy/v1",
-  "version": "2026-08-25.a5",
+  "version": "2026-08-25.a6",
   "repository": "djibian/polacore",
   "integration_branch": "engineering",
   "authorized_head_prefixes": [
@@ -78,7 +78,8 @@
     "scripts/merge_controller_protocol.py",
     "scripts/merge_decision_bundle.py",
     "scripts/merge_governor.py",
-    "scripts/merge_observation_collect.py"
+    "scripts/merge_observation_collect.py",
+    "scripts/merge_provider_capability.py"
   ],
   "forbidden_path_prefixes": [
     ".github/",
@@ -97,10 +98,12 @@
     "docs/automation/MERGE_CONTROLLER.md",
     "docs/automation/MERGE_GOVERNOR.md",
     "docs/automation/MERGE_OBSERVATION.md",
+    "docs/automation/MERGE_PROVIDER.md",
     "scripts/merge_certificate_build.py",
     "scripts/merge_controller_protocol.py",
     "scripts/merge_decision_bundle.py",
     "scripts/merge_governor.py",
-    "scripts/merge_observation_collect.py"
+    "scripts/merge_observation_collect.py",
+    "scripts/merge_provider_capability.py"
   ]
 }

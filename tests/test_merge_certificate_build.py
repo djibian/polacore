@@ -175,6 +175,7 @@ class MergeCertificateBuildTests(unittest.TestCase):
             "scripts/merge_certificate_build.py",
             "scripts/merge_decision_bundle.py",
             "scripts/merge_controller_protocol.py",
+            "scripts/merge_provider_capability.py",
         ):
             with self.subTest(path=relative):
                 tree = ast.parse((ROOT / relative).read_text(encoding="utf-8"))

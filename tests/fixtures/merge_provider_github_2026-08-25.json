@@ -1,0 +1,153 @@
+{
+  "schema": "polacore.merge-provider-capability-evidence/v1",
+  "provider": "GITHUB_COM",
+  "repository": "djibian/polacore",
+  "repository_owner_type": "USER",
+  "target_ref": "engineering",
+  "required_merge_method": "SQUASH",
+  "observed_at": "2026-08-25",
+  "ruleset": {
+    "id": 21296946,
+    "enforcement": "ACTIVE",
+    "pull_request_required": true,
+    "non_fast_forward_forbidden": true,
+    "deletion_forbidden": true,
+    "merge_queue_required": false,
+    "bypass_actor_count": 0,
+    "current_actor_can_bypass": false,
+    "allowed_merge_methods": [
+      "MERGE",
+      "REBASE",
+      "SQUASH"
+    ],
+    "source_ids": [
+      "POLACORE_ENGINEERING_RULESET"
+    ]
+  },
+  "operations": [
+    {
+      "id": "REST_PULL_MERGE",
+      "availability": "AVAILABLE",
+      "pull_request_precondition": "EXACT_PR",
+      "head_precondition": "EXACT_HEAD",
+      "base_precondition": "NONE",
+      "protection_behavior": "RESPECTS_WITHOUT_BYPASS",
+      "merge_method": "SQUASH",
+      "audit_behavior": "PR_MERGED_EXACT_SHA",
+      "outcome_recovery": "FRESH_STATE_RECOVERABLE",
+      "source_ids": [
+        "GITHUB_PULL_MERGE_API"
+      ]
+    },
+    {
+      "id": "REST_PULL_MERGE_ASYNC",
+      "availability": "AVAILABLE",
+      "pull_request_precondition": "EXACT_PR",
+      "head_precondition": "EXACT_HEAD",
+      "base_precondition": "NONE",
+      "protection_behavior": "RESPECTS_WITHOUT_BYPASS",
+      "merge_method": "SQUASH",
+      "audit_behavior": "PR_MERGED_EXACT_SHA",
+      "outcome_recovery": "EPHEMERAL_RESULT",
+      "source_ids": [
+        "GITHUB_PULL_MERGE_API"
+      ]
+    },
+    {
+      "id": "REST_GIT_REF_UPDATE",
+      "availability": "AVAILABLE",
+      "pull_request_precondition": "NONE",
+      "head_precondition": "NONE",
+      "base_precondition": "FAST_FORWARD_ONLY",
+      "protection_behavior": "UNPROVEN",
+      "merge_method": "UNPROVEN",
+      "audit_behavior": "REF_UPDATE_ONLY",
+      "outcome_recovery": "FRESH_STATE_RECOVERABLE",
+      "source_ids": [
+        "GITHUB_GIT_REF_API",
+        "GITHUB_RULESET_DOCUMENTATION"
+      ]
+    },
+    {
+      "id": "GITHUB_MERGE_QUEUE",
+      "availability": "UNAVAILABLE",
+      "pull_request_precondition": "EXACT_PR",
+      "head_precondition": "CURRENT_HEAD",
+      "base_precondition": "LATEST_BASE",
+      "protection_behavior": "RESPECTS_WITHOUT_BYPASS",
+      "merge_method": "PROVIDER_SELECTED",
+      "audit_behavior": "QUEUE_ENTRY",
+      "outcome_recovery": "FRESH_STATE_RECOVERABLE",
+      "source_ids": [
+        "GITHUB_MERGE_QUEUE_DOCUMENTATION",
+        "POLACORE_ENGINEERING_RULESET"
+      ]
+    }
+  ],
+  "journal": {
+    "id": "NO_DURABLE_JOURNAL_ESTABLISHED",
+    "availability": "UNAVAILABLE",
+    "binding": "NONE",
+    "monotonicity": "NONE",
+    "durability": "NONE",
+    "retention": "NONE",
+    "candidate_write_access": false,
+    "source_ids": [
+      "GITHUB_PULL_MERGE_API"
+    ]
+  },
+  "selected_operation": null,
+  "sources": [
+    {
+      "id": "GITHUB_PULL_MERGE_API",
+      "kind": "GITHUB_PRIMARY_DOCUMENTATION",
+      "url": "https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request",
+      "retrieved_on": "2026-08-25",
+      "supports": [
+        "HEAD_SHA_ONLY",
+        "ASYNC_RESULT_RETENTION_24H",
+        "CONTENTS_WRITE_REQUIRED"
+      ]
+    },
+    {
+      "id": "GITHUB_GIT_REF_API",
+      "kind": "GITHUB_PRIMARY_DOCUMENTATION",
+      "url": "https://docs.github.com/en/rest/git/refs#update-a-reference",
+      "retrieved_on": "2026-08-25",
+      "supports": [
+        "FAST_FORWARD_ONLY"
+      ]
+    },
+    {
+      "id": "GITHUB_MERGE_QUEUE_DOCUMENTATION",
+      "kind": "GITHUB_PRIMARY_DOCUMENTATION",
+      "url": "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/merging-a-pull-request-with-a-merge-queue",
+      "retrieved_on": "2026-08-25",
+      "supports": [
+        "LATEST_BASE",
+        "ORGANIZATION_REPOSITORY_ONLY"
+      ]
+    },
+    {
+      "id": "GITHUB_RULESET_DOCUMENTATION",
+      "kind": "GITHUB_PRIMARY_DOCUMENTATION",
+      "url": "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets",
+      "retrieved_on": "2026-08-25",
+      "supports": [
+        "PULL_REQUEST_REQUIRED",
+        "NO_BYPASS"
+      ]
+    },
+    {
+      "id": "POLACORE_ENGINEERING_RULESET",
+      "kind": "GITHUB_AUTHENTICATED_REPOSITORY_STATE",
+      "url": "https://api.github.com/repos/djibian/polacore/rulesets/21296946",
+      "retrieved_on": "2026-08-25",
+      "supports": [
+        "ACTIVE_ENGINEERING_RULESET",
+        "NO_BYPASS",
+        "PULL_REQUEST_REQUIRED"
+      ]
+    }
+  ]
+}

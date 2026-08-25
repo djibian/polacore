@@ -10,7 +10,9 @@ capability or merge capability.
 
 The interface is an obligation, not an authority grant. A live adapter remains
 `UNPROVEN` until its semantics and permissions are separately established from
-the protected `engineering` base.
+the protected `engineering` base. `MERGE_PROVIDER.md` defines the separate
+primary-evidence capability gate that must succeed before such an adapter can
+be selected.
 
 ## Atomicity requirement
 
