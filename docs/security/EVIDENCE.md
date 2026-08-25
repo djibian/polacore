@@ -20,6 +20,12 @@ Use the classifications defined in `AGENTS.md`:
 
 ## Current repository evidence
 
+### Repository cleanup baseline
+
+The 2026-08-25 repository-hygiene review was frozen at `engineering` SHA `d2c47d7dd053df3f460636c15b8eeaa2bc93ee6a` in issue #49. It recorded 36 branches, 29 pull requests, 16 active workflow files, 342 Actions runs and 86 tracked files before cleanup.
+
+Classification: `VERIFIED_BY_CODE_INSPECTION` for that exact inventory snapshot. It is operational evidence, not a security proof.
+
 ### Runtime confinement policy / OCI configuration
 
 Repository artifacts currently include:
@@ -49,6 +55,32 @@ Classification: `UNPROVEN` for full validation-to-launch binding unless newer re
 Historical architecture records a probe involving Linux mount-object primitives that could not exercise the privileged path in ordinary CI because required capabilities were unavailable.
 
 Classification: explicit `SKIP / UNPROVEN` until a privileged environment produces a real PASS or FAIL.
+
+### P117 descriptor-relative staging containment
+
+Repository artifacts:
+
+- `experiments/p117/`;
+- `tests/evil/p117_adversarial_probe.py`;
+- `docs/security/P117_ADVERSARIAL_EVIDENCE.md`;
+- `docs/security/P117_REVIEW.md`;
+- Security Evil Tests run `32233103096` for the retained adversarial change.
+
+Classification: narrow exact exercised containment cases are `PROVEN_BY_TEST`; enumeration-to-open object identity and implicit special-object rejection are `REFUTED`; privileged mount crossing and complete recursive materialization remain `UNPROVEN`.
+
+Rejected implementation PR #8 is not evidence of a repaired primitive. Its remote head `8cfd78df2845b0c32e310bc41aa550bfc185f989` retained blocking root-anchor, special-object activation and FD-lifecycle defects.
+
+### Formal security constitution feasibility
+
+The durable result is `docs/security/FORMAL_CONSTITUTION_EXPERIMENT_V0.md`. PR #28 archives the exact experimental code at head `3066747b769b463f5456dfced06d7572fa3e420b`; workflow run `32756156073` completed on that exact head.
+
+Classification: `VERIFIED_BY_CI` for the stated formal obligations and negative controls only. v0 adequacy is `REFUTED`; v1 is promising but whole-system complete mediation, unbypassability and production TCB remain `UNPROVEN`. Decision: `MODIFY`.
+
+### First real autonomous task
+
+Issue #36 produced PR #46, merged into `engineering` at `d2c47d7dd053df3f460636c15b8eeaa2bc93ee6a`. The generated invariant-listing tool passed its causal unit tests, deterministic candidate checks and an independent read-only Reviewer on the accepted exact candidate.
+
+Classification: `VERIFIED_BY_CI` for the tested tool behavior and for one demonstrated end-to-end pilot path. It does not prove the generalized autonomous platform, which remains issue #47 work.
 
 ## Evidence entry template
 

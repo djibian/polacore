@@ -20,9 +20,11 @@ permissions:
 
 jobs:
   security-evil-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Build and run SecurityFloor persistence probes
         run: bash tests/evil/run_persistent_credential_authority.sh
       - name: Enforce RuntimeConfinementProfile, OCI and bundle mutations
