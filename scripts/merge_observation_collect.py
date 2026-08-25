@@ -28,6 +28,7 @@ from merge_governor import (
     token,
     validate_policy,
     validate_task,
+    validate_workflow_path,
 )
 
 
@@ -158,9 +159,7 @@ def _validate_evidence_identity(
     item: dict[str, Any], label: str, seen: set[tuple[str, str, str]]
 ) -> dict[str, Any]:
     workflow = nonempty_string(item["workflow"], f"{label}.workflow", 200)
-    workflow_path = canonical_path(item["workflow_path"], f"{label}.workflow_path")
-    if not workflow_path.startswith(".github/workflows/") or not workflow_path.endswith((".yml", ".yaml")):
-        reject(f"{label}.workflow_path is not a GitHub Actions workflow")
+    workflow_path = validate_workflow_path(item["workflow_path"], f"{label}.workflow_path")
     job_name = nonempty_string(item["job_name"], f"{label}.job_name", 150)
     if "/ pr " in job_name or "/ head " in job_name or any(ord(c) < 32 for c in job_name):
         reject(f"{label}.job_name contains reserved framing")
@@ -321,6 +320,7 @@ def collect_evidence(
                 "name": rule["name"],
                 "kind": rule["kind"],
                 "workflow": rule["workflow"],
+                "workflow_path": rule["workflow_path"],
                 "workflow_sha": base_sha,
                 "run_id": run_id,
                 "job_id": job_id,
@@ -334,6 +334,7 @@ def collect_evidence(
             {
                 "role": rule["role"],
                 "workflow": rule["workflow"],
+                "workflow_path": rule["workflow_path"],
                 "workflow_sha": base_sha,
                 "run_id": run_id,
                 "job_id": job_id,

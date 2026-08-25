@@ -82,6 +82,7 @@ CHECK_KEYS = {
     "name",
     "kind",
     "workflow",
+    "workflow_path",
     "workflow_sha",
     "run_id",
     "job_id",
@@ -91,6 +92,7 @@ CHECK_KEYS = {
 VERDICT_KEYS = {
     "role",
     "workflow",
+    "workflow_path",
     "workflow_sha",
     "run_id",
     "job_id",
@@ -213,6 +215,13 @@ def canonical_path(value: Any, label: str, *, allow_pattern: bool = False) -> st
     return base + suffix
 
 
+def validate_workflow_path(value: Any, label: str) -> str:
+    path = canonical_path(value, label)
+    if not path.startswith(".github/workflows/") or not path.endswith((".yml", ".yaml")):
+        reject(f"{label} is not a GitHub Actions workflow")
+    return path
+
+
 def pattern_matches(pattern: str, path: str) -> bool:
     if pattern.endswith("/**"):
         base = pattern[:-3]
@@ -325,6 +334,7 @@ def validate_checks(
         names.add(name)
         token(item["kind"], f"{label}[{index}].kind")
         nonempty_string(item["workflow"], f"{label}[{index}].workflow", 200)
+        validate_workflow_path(item["workflow_path"], f"{label}[{index}].workflow_path")
         if sha(item["workflow_sha"], f"{label}[{index}].workflow_sha") != expected_workflow_sha:
             reject(f"{label}[{index}] used candidate-controlled or stale workflow code")
         positive_int(item["run_id"], f"{label}[{index}].run_id")
@@ -392,6 +402,7 @@ def validate_verdicts(
             reject(f"{label} contains duplicate verdict roles")
         roles.add(role)
         nonempty_string(item["workflow"], f"{label}[{index}].workflow", 200)
+        validate_workflow_path(item["workflow_path"], f"{label}[{index}].workflow_path")
         if sha(item["workflow_sha"], f"{label}[{index}].workflow_sha") != expected_workflow_sha:
             reject(f"{label}[{index}] used candidate-controlled or stale workflow code")
         positive_int(item["run_id"], f"{label}[{index}].run_id")
