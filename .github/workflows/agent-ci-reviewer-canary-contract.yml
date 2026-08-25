@@ -82,6 +82,45 @@ jobs:
 
           python3 -m py_compile scripts/agent_router_validate.py scripts/agent_reviewer_validate.py
 
+          python3 - <<'PY'
+          import json, pathlib, subprocess, tempfile
+
+          validator='scripts/agent_reviewer_validate.py'
+          good={
+              'verdict':'READY_FOR_HUMAN',
+              'confidence':0.91,
+              'rationale':'Synthetic bounded review with sufficient rationale for deterministic Reviewer validation.'
+          }
+          suffix='</parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>'
+
+          def event(text):
+              return json.dumps({'type':'text','part':{'text':text}}, ensure_ascii=False)+'\n'
+
+          def run(text, expect_ok):
+              with tempfile.TemporaryDirectory() as d:
+                  inp=pathlib.Path(d)/'in.jsonl'
+                  out=pathlib.Path(d)/'out.json'
+                  inp.write_text(event(text), encoding='utf-8')
+                  p=subprocess.run(['python3',validator,str(inp),str(out)],capture_output=True,text=True)
+                  if expect_ok:
+                      assert p.returncode==0,(p.stdout,p.stderr)
+                      parsed=json.loads(out.read_text(encoding='utf-8'))
+                      assert parsed['verdict']=='READY_FOR_HUMAN',parsed
+                  else:
+                      assert p.returncode!=0,(p.stdout,p.stderr)
+
+          terminal=json.dumps(good,separators=(',',':'))
+          run(terminal, True)
+          run('Non-authoritative review narration.\n'+terminal, True)
+          run('Non-authoritative review narration.\n'+terminal+suffix, True)
+          run('Non-authoritative review narration.\n'+terminal+suffix+'\ntrailing prose', False)
+          run('Earlier {"verdict":"BLOCKED"} decision.\n'+terminal, False)
+          run(terminal+'\ntrailing prose', False)
+          bad=dict(good); bad['merge_authorized']=True
+          run(json.dumps(bad,separators=(',',':')), False)
+          print('Reviewer terminal decision and exact transport-suffix contract verified.')
+          PY
+
           ruby -e "require 'psych'; y=Psych.safe_load_file(ARGV[0], aliases: true); step=y.fetch('jobs').fetch('finalize').fetch('steps').find { |s| s['id'] == 'final' }; File.write('/tmp/finalizer.sh', step.fetch('run'))" .github/workflows/agent-router.yml
           bash -n /tmp/finalizer.sh
           cat > /tmp/reviewer-decision.json <<'EOF'
@@ -99,7 +138,7 @@ jobs:
           grep -Fx 'verdict=READY_FOR_HUMAN' /tmp/finalizer-output >/dev/null
           grep -Fx 'confidence=0.95' /tmp/finalizer-output >/dev/null
           grep -Fx 'ci_passed=true' /tmp/finalizer-output >/dev/null
-          echo 'CI/Reviewer workflow structure, DeepSeek model, authority boundaries, and finalizer handoff verified.'
+          echo 'CI/Reviewer workflow structure, DeepSeek model, authority boundaries, terminal framing, and finalizer handoff verified.'
 
   reviewer-contract:
     if: github.event.pull_request.head.repo.full_name == github.repository
