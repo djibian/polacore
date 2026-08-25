@@ -2,7 +2,7 @@
 
 ## Current demonstrated state
 
-PolaCore does not yet have the generalized autonomous system described below. The retained Canary, Real Task v1 and A0 workflows are evidence-bearing pilots from issues #36 and #46. They demonstrate bounded mechanics, not a reusable end-to-end control plane.
+PolaCore does not yet have the generalized autonomous system described below. The retained Canary, Real Task v1 and A0 workflows are evidence-bearing pilots consolidated through issue #36 and PR #46. They demonstrate bounded mechanics, not a reusable end-to-end control plane.
 
 Issues #47 and #48 own construction of the target platform and its deterministic Merge Governor. Until #48 produces accepted exact-SHA evidence, no agent may infer that a trusted Governor exists or that pilot success authorizes generalized autonomous integration. `engineering` remains the integration branch, but integration uses only the controls actually present and accepted in the repository.
 
