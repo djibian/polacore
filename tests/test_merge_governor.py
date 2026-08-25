@@ -345,6 +345,7 @@ class MergeGovernorContractTests(unittest.TestCase):
     def test_duplicate_merge_replay_is_idempotent(self) -> None:
         policy, certificate, observation = fixture()
         observation["current_engineering_sha"] = MERGE
+        observation["mergeable"] = False
         observation["merge"] = {
             "state": "MERGED",
             "head_sha": HEAD,
@@ -358,6 +359,7 @@ class MergeGovernorContractTests(unittest.TestCase):
     def test_replay_with_different_certificate_is_rejected(self) -> None:
         policy, certificate, observation = fixture()
         observation["current_engineering_sha"] = MERGE
+        observation["mergeable"] = False
         observation["merge"] = {
             "state": "MERGED",
             "head_sha": HEAD,

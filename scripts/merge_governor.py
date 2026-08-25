@@ -554,8 +554,9 @@ def evaluate(policy: dict[str, Any], certificate: dict[str, Any], observation: d
         reject("contradictory or stale evidence remains")
     if observation["draft"] is not False:
         reject("draft or ambiguous pull-request state is not eligible")
-    if observation["mergeable"] is not True:
-        reject("GitHub has not established the exact candidate as mergeable")
+    mergeable = observation["mergeable"]
+    if mergeable is not True and mergeable is not False and mergeable is not None:
+        reject("pull-request mergeability state has invalid type")
     if observation["protection_bypass_requested"] is not False:
         reject("repository-protection bypass is forbidden")
 
@@ -583,6 +584,8 @@ def evaluate(policy: dict[str, Any], certificate: dict[str, Any], observation: d
     exact_keys(merge, OPEN_MERGE_KEYS, "observation.merge")
     if state != "OPEN":
         reject("unsupported merge state")
+    if mergeable is not True:
+        reject("GitHub has not established the exact candidate as mergeable")
 
     return {
         "decision": "ELIGIBLE",

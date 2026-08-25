@@ -48,6 +48,7 @@ SNAPSHOT_KEYS = {
     "jobs",
     "reviews",
     "review_threads",
+    "merge_record",
 }
 TASK_MANIFEST_KEYS = {
     "schema",
@@ -64,6 +65,7 @@ CHECK_RULE_KEYS = {"name", "kind", "workflow", "workflow_path", "job_name"}
 VERDICT_RULE_KEYS = {"role", "workflow", "workflow_path", "job_name"}
 PAGE_KEYS = {"complete", "items"}
 JOBS_KEYS = {"complete", "by_run"}
+MERGE_RECORD_KEYS = {"head_sha", "merge_sha", "certificate_sha256"}
 ALLOWED_FILE_STATUSES = {
     "added": "ADDED",
     "modified": "MODIFIED",
@@ -88,6 +90,14 @@ def field(value: Any, name: str, label: str) -> Any:
     if name not in obj:
         reject(f"{label}.{name} is missing")
     return obj[name]
+
+
+def sha256_digest(value: Any, label: str) -> str:
+    text = nonempty_string(value, label, 71)
+    invalid_hex = any(character not in "0123456789abcdef" for character in text[7:])
+    if len(text) != 71 or not text.startswith("sha256:") or invalid_hex:
+        reject(f"{label} must be a lowercase SHA-256 digest")
+    return text
 
 
 def complete_page(value: Any, label: str, limit: int) -> list[Any]:
@@ -412,16 +422,36 @@ def collect(policy: dict[str, Any], manifest: dict[str, Any], snapshot: dict[str
     draft = field(pr, "draft", "snapshot.pull_request")
     mergeable = field(pr, "mergeable", "snapshot.pull_request")
     merged = field(pr, "merged", "snapshot.pull_request")
-    if state != "open":
-        reject("v1 collector accepts open pull requests only")
     if (
         not isinstance(draft, bool)
         or (mergeable is not True and mergeable is not False and mergeable is not None)
         or not isinstance(merged, bool)
     ):
         reject("pull-request draft/mergeable/merged state has invalid type")
+
     if merged:
-        reject("v1 collector accepts open candidates only; replay requires a trusted merge record")
+        if state != "closed":
+            reject("merged pull request must be closed")
+        merge_sha = sha(field(pr, "merge_commit_sha", "snapshot.pull_request"), "snapshot.pull_request.merge_commit_sha")
+        record = exact_keys(snapshot["merge_record"], MERGE_RECORD_KEYS, "snapshot.merge_record")
+        if sha(record["head_sha"], "snapshot.merge_record.head_sha") != head_sha:
+            reject("merge record is bound to another candidate head")
+        if sha(record["merge_sha"], "snapshot.merge_record.merge_sha") != merge_sha:
+            reject("merge record does not match GitHub merge commit")
+        merge_state = {
+            "state": "MERGED",
+            "head_sha": head_sha,
+            "merge_sha": merge_sha,
+            "certificate_sha256": sha256_digest(
+                record["certificate_sha256"], "snapshot.merge_record.certificate_sha256"
+            ),
+        }
+    else:
+        if state != "open":
+            reject("unmerged pull request must be open")
+        if snapshot["merge_record"] is not None:
+            reject("open pull request may not carry a merge replay record")
+        merge_state = {"state": "OPEN"}
 
     return {
         "schema": "polacore.merge-observation/v1",
@@ -446,7 +476,7 @@ def collect(policy: dict[str, Any], manifest: dict[str, Any], snapshot: dict[str
         "draft": draft,
         "mergeable": mergeable,
         "protection_bypass_requested": False,
-        "merge": {"state": "OPEN"},
+        "merge": merge_state,
     }
 
 

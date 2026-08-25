@@ -37,6 +37,8 @@ version and canonical SHA-256 digest.
 The certificate is built by the offline trusted-base contract documented in
 `MERGE_CERTIFICATE.md`. Untrusted claims cannot select task authority, assurance
 or policy, and the exact workflow path is part of every check and verdict.
+`MERGE_BUNDLE.md` specifies the separately digest-bound decision bundle and the
+non-authoritative intent that a future live controller may consume.
 
 ## Fail-closed rules
 
@@ -84,7 +86,8 @@ lower these floors.
 - `ELIGIBLE`: the supplied state satisfies the decision contract. It is still
   not a product-correctness or security proof.
 - `ALREADY_MERGED`: the exact recorded certificate/head/merge tuple was already
-  applied; the controller must make no second merge request.
+  applied; GitHub may then report the closed PR as non-mergeable or unknown, and
+  the controller must make no second merge request.
 - `UNPROVEN`: stop. No merge may be attempted.
 
 Run the contract suite with:

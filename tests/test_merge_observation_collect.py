@@ -133,6 +133,7 @@ def fixture() -> tuple[dict, dict, dict]:
         },
         "reviews": {"complete": True, "items": []},
         "review_threads": {"complete": True, "items": []},
+        "merge_record": None,
     }
     return policy, task, snapshot
 
@@ -311,7 +312,75 @@ class ObservationCollectorTests(unittest.TestCase):
         self.assert_governor_rejected(mutate)
 
     def test_merged_candidate_requires_separate_replay_record(self) -> None:
-        self.assert_collect_rejected(lambda _p, _t, s: s["pull_request"].__setitem__("merged", True))
+        def mutate(_policy, _task, snapshot):
+            snapshot["pull_request"].update(
+                {
+                    "state": "closed",
+                    "merged": True,
+                    "mergeable": False,
+                    "merge_commit_sha": "9" * 40,
+                }
+            )
+
+        self.assert_collect_rejected(mutate)
+
+    def test_exact_merged_replay_is_idempotent(self) -> None:
+        policy, task, snapshot = fixture()
+        open_observation = collector.collect(policy, task, snapshot)
+        certificate = certificate_from(open_observation)
+        merge_sha = "9" * 40
+        snapshot["pull_request"].update(
+            {"state": "closed", "merged": True, "mergeable": False, "merge_commit_sha": merge_sha}
+        )
+        snapshot["current_base"]["commit"]["sha"] = merge_sha
+        snapshot["merge_record"] = {
+            "head_sha": HEAD,
+            "merge_sha": merge_sha,
+            "certificate_sha256": governor.digest(certificate),
+        }
+        replay = collector.collect(policy, task, snapshot)
+        result = governor.evaluate(policy, certificate, replay)
+        self.assertEqual(result["decision"], "ALREADY_MERGED")
+        self.assertEqual(result["merge_sha"], merge_sha)
+
+    def test_replay_merge_sha_must_match_github(self) -> None:
+        def mutate(_policy, _task, snapshot):
+            snapshot["pull_request"].update(
+                {"state": "closed", "merged": True, "mergeable": False, "merge_commit_sha": "9" * 40}
+            )
+            snapshot["merge_record"] = {
+                "head_sha": HEAD,
+                "merge_sha": "a" * 40,
+                "certificate_sha256": "sha256:" + "0" * 64,
+            }
+
+        self.assert_collect_rejected(mutate)
+
+    def test_replay_record_head_must_match_candidate(self) -> None:
+        def mutate(_policy, _task, snapshot):
+            snapshot["pull_request"].update(
+                {"state": "closed", "merged": True, "mergeable": None, "merge_commit_sha": "9" * 40}
+            )
+            snapshot["merge_record"] = {
+                "head_sha": "a" * 40,
+                "merge_sha": "9" * 40,
+                "certificate_sha256": "sha256:" + "0" * 64,
+            }
+
+        self.assert_collect_rejected(mutate)
+
+    def test_replay_certificate_digest_is_strict(self) -> None:
+        def mutate(_policy, _task, snapshot):
+            snapshot["pull_request"].update(
+                {"state": "closed", "merged": True, "mergeable": None, "merge_commit_sha": "9" * 40}
+            )
+            snapshot["merge_record"] = {
+                "head_sha": HEAD,
+                "merge_sha": "9" * 40,
+                "certificate_sha256": "sha256:" + "A" * 64,
+            }
+
+        self.assert_collect_rejected(mutate)
 
     def test_unknown_snapshot_authority_key_is_rejected(self) -> None:
         self.assert_collect_rejected(lambda _p, _t, s: s.__setitem__("merge_authorized", True))

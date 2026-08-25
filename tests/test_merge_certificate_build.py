@@ -173,6 +173,7 @@ class MergeCertificateBuildTests(unittest.TestCase):
             "scripts/merge_governor.py",
             "scripts/merge_observation_collect.py",
             "scripts/merge_certificate_build.py",
+            "scripts/merge_decision_bundle.py",
         ):
             with self.subTest(path=relative):
                 tree = ast.parse((ROOT / relative).read_text(encoding="utf-8"))
