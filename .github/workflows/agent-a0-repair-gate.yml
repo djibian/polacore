@@ -1,0 +1,262 @@
+name: PolaCore A0 Repair Gate
+
+on:
+  pull_request:
+    branches: [engineering]
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - '.gitignore'
+      - 'opencode.json'
+      - '.opencode/agents/**'
+      - '.github/workflows/agent-*.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a0-repair-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  deterministic-gate:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'agent/a0-repair-') &&
+      contains(github.event.pull_request.labels.*.name, 'agent:a0-maintenance')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    outputs:
+      gate_b64: ${{ steps.gate.outputs.b64 }}
+      source_run_id: ${{ steps.meta.outputs.source_run_id }}
+      source_head_sha: ${{ steps.meta.outputs.source_head_sha }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - name: Checkout trusted engineering gate code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: engineering
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate trusted PR metadata and source failure
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > /tmp/a0-meta
+          import os,re
+          body=os.environ.get('PR_BODY') or ''
+          if '<!-- POLACORE_A0_REPAIR -->' not in body: raise SystemExit('missing A0 marker')
+          issue=re.search(r'^Source-Issue:\s*(\d+)\s*$',body,re.M)
+          run=re.search(r'^Source-Run-ID:\s*(\d+)\s*$',body,re.M)
+          sha=re.search(r'^Source-Head-SHA:\s*([0-9a-f]{40})\s*$',body,re.M)
+          if not issue or issue.group(1) != '36' or not run or not sha: raise SystemExit('invalid A0 source metadata')
+          if sha.group(1) != os.environ['BASE_SHA']: raise SystemExit('A0 PR base is not the failed engineering SHA')
+          print(run.group(1)); print(sha.group(1))
+          PY
+          mapfile -t meta < /tmp/a0-meta
+          source_run_id="${meta[0]}"
+          source_head_sha="${meta[1]}"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${source_run_id}" > /tmp/source-run.json
+          SOURCE_HEAD_SHA="$source_head_sha" python3 - <<'PY'
+          import json,os
+          r=json.load(open('/tmp/source-run.json',encoding='utf-8'))
+          if r.get('name') != 'PolaCore Real Task v1': raise SystemExit('wrong source workflow')
+          if r.get('event') != 'issues': raise SystemExit('wrong source event')
+          if r.get('conclusion') not in {'failure','timed_out'}: raise SystemExit('source run is not failed')
+          if r.get('head_sha') != os.environ['SOURCE_HEAD_SHA']: raise SystemExit('source run/head mismatch')
+          PY
+          echo "source_run_id=$source_run_id" >> "$GITHUB_OUTPUT"
+          echo "source_head_sha=$source_head_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch candidate commit without executing candidate code
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$HEAD_SHA"
+          test "$(git merge-base "$BASE_SHA" "$HEAD_SHA")" = "$BASE_SHA" || { echo 'A0 candidate is not based on declared engineering SHA' >&2; exit 1; }
+          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Fxq 'scripts/agent_a0_patch_gate.py'; then
+            echo 'A0 candidate attempted to modify its trusted gate' >&2
+            exit 1
+          fi
+          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Fxq '.github/workflows/agent-a0-repair-gate.yml'; then
+            echo 'A0 candidate attempted to modify its gate workflow' >&2
+            exit 1
+          fi
+
+      - name: Apply deterministic A0 diff policy
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/agent_a0_patch_gate.py "$BASE_SHA" "$HEAD_SHA" --output /tmp/a0-gate.json
+          echo "b64=$(base64 -w0 /tmp/a0-gate.json)" >> "$GITHUB_OUTPUT"
+
+  wait-candidate-ci:
+    needs: deterministic-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      GATE_B64: ${{ needs.deterministic-gate.outputs.gate_b64 }}
+    steps:
+      - name: Wait for every path-required candidate workflow on exact head
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GATE_B64" | base64 --decode > /tmp/gate.json
+          for _ in $(seq 1 36); do
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&per_page=100" > /tmp/runs.json
+            set +e
+            python3 - <<'PY'
+          import json
+          gate=json.load(open('/tmp/gate.json',encoding='utf-8'))
+          runs=json.load(open('/tmp/runs.json',encoding='utf-8')).get('workflow_runs',[])
+          expected=gate.get('expected_workflows',[])
+          latest={}
+          for r in runs:
+              latest.setdefault(r.get('name'),r)
+          missing=[]; pending=[]; failed=[]
+          for name in expected:
+              r=latest.get(name)
+              if not r: missing.append(name); continue
+              if r.get('status') != 'completed': pending.append(name); continue
+              if r.get('conclusion') != 'success': failed.append((name,r.get('conclusion')))
+          if failed:
+              print('failed candidate workflows:',failed); raise SystemExit(1)
+          if missing or pending:
+              print('waiting for:',missing+pending); raise SystemExit(2)
+          print('all expected candidate workflows are success on exact head')
+          PY
+            status=$?
+            set -e
+            if [ "$status" -eq 0 ]; then exit 0; fi
+            if [ "$status" -eq 1 ]; then exit 1; fi
+            sleep 10
+          done
+          echo 'candidate CI did not reach a complete trustworthy state' >&2
+          exit 1
+
+  independent-review:
+    needs: [deterministic-gate, wait-candidate-ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      SOURCE_RUN_ID: ${{ needs.deterministic-gate.outputs.source_run_id }}
+      GATE_B64: ${{ needs.deterministic-gate.outputs.gate_b64 }}
+      OPENCODE_AUTO_SHARE: 'false'
+      OPENCODE_DISABLE_AUTOUPDATE: 'true'
+      OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true'
+      OPENCODE_DISABLE_LSP_DOWNLOAD: 'true'
+      OPENCODE_DISABLE_CLAUDE_CODE: 'true'
+    steps:
+      - name: Checkout trusted A0 reviewer and validator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: engineering
+          persist-credentials: false
+
+      - name: Build bounded reviewer evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GATE_B64" | base64 --decode > /tmp/gate.json
+          gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" > /tmp/pr.diff
+          gh run view "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed > /tmp/source.log 2>&1 || true
+          mkdir -p agent-input
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          gate=json.load(open('/tmp/gate.json',encoding='utf-8'))
+          diff=Path('/tmp/pr.diff').read_text(encoding='utf-8',errors='replace')
+          log=Path('/tmp/source.log').read_text(encoding='utf-8',errors='replace')
+          if len(diff)>20000: diff=diff[:20000]+'\n[DIFF TRUNCATED]\n'
+          if len(log)>20000: log=log[-20000:]+'\n[OLDER LOG TRUNCATED]\n'
+          text=f'''# A0 Reviewer input boundary
+          ## TRUSTED CONTROL
+          Source issue: 36
+          Source failed run: {os.environ['SOURCE_RUN_ID']}
+          Failed engineering SHA: {os.environ['BASE_SHA']}
+          Candidate exact head SHA: {os.environ['HEAD_SHA']}
+          Deterministic A0 gate: PASS
+          Changed paths: {gate['changed_paths']}
+          Required candidate workflows: {gate['expected_workflows']}
+          Required candidate workflows on exact head: PASS
+
+          ## UNTRUSTED EVIDENCE
+          ### Candidate diff
+          {diff}
+
+          ### Source failed logs
+          {log}
+          '''
+          Path('agent-input/a0-reviewer-context.md').write_text(text,encoding='utf-8')
+          PY
+
+      - name: Require Albert secret
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: test -n "${ALBERT_API_KEY:-}" || { echo 'ALBERT_API_KEY is missing' >&2; exit 1; }
+
+      - name: Install pinned OpenCode
+        run: npm install --global opencode-ai@1.18.21
+
+      - name: Run independent A0 Reviewer with bounded model fallback
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: |
+          set -u
+          ok=false
+          for model in albert/deepseek-v4-flash albert/openai/gpt-oss-120b albert/qwen3-coder-30b-A3b-instruct; do
+            set +e
+            opencode run --agent a0-reviewer --model "$model" --format json \
+              'Review only agent-input/a0-reviewer-context.md under the A0 policy. Return the exact Reviewer JSON contract and nothing else.' \
+              > /tmp/a0-reviewer.jsonl 2>&1
+            status=$?
+            set -e
+            if [ "$status" -eq 0 ] && python3 scripts/agent_reviewer_validate.py /tmp/a0-reviewer.jsonl /tmp/a0-reviewer-decision.json; then
+              verdict="$(jq -r '.verdict' /tmp/a0-reviewer-decision.json)"
+              if [ "$verdict" = 'READY_FOR_HUMAN' ]; then ok=true; break; fi
+            fi
+          done
+          "$ok" || { cat /tmp/a0-reviewer.jsonl >&2 || true; exit 1; }
+          cat /tmp/a0-reviewer-decision.json
+
+      - name: Record green A0 gate evidence on PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          rationale="$(jq -r '.rationale' /tmp/a0-reviewer-decision.json | sed 's/@/@\u200b/g')"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "### PolaCore A0 repair gate
+
+          - Deterministic A0 diff gate: \`PASS\`
+          - Required exact-head candidate workflows: \`PASS\`
+          - Independent Reviewer: \`READY_FOR_HUMAN\`
+          - Reviewer rationale: ${rationale}
+
+          \`VERIFIED_BY_CI\` applies only to the deterministic gate and listed candidate checks. The Reviewer result is \`INFERENCE\`. This PR is eligible for the delegated owner supervisor to merge into \`engineering\`; it is never eligible for \`main\`."
