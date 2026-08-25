@@ -3,9 +3,11 @@
 
 Reviewer prose is never authoritative. The validator accepts either an exact JSON
 final text (the original contract) or, for models that emit non-authoritative
-review narration, exactly one decision-shaped JSON object on the final non-empty
-line. Any earlier decision-shaped JSON is rejected. Only the validated terminal
-object can drive repository state.
+review narration, exactly one decision-shaped JSON object at the end of the model
+answer. A narrowly allowlisted OpenCode/DeepSeek transport suffix may follow that
+JSON object; arbitrary trailing prose remains forbidden. Any earlier decision-
+shaped JSON is rejected. Only the validated terminal object can drive repository
+state.
 """
 
 from __future__ import annotations
@@ -16,6 +18,10 @@ import sys
 
 ALLOWED = {"READY_FOR_HUMAN", "CHANGES_REQUIRED", "BLOCKED"}
 EXPECTED_KEYS = {"verdict", "confidence", "rationale"}
+# Observed OpenCode/DeepSeek V4 Flash serialization artifact. This is transport
+# framing only, never authoritative model content. Keep the allowlist exact and
+# fail closed on every other trailing byte.
+ALLOWED_TRANSPORT_SUFFIX = "</parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>"
 
 
 def fail(message: str) -> None:
@@ -41,13 +47,21 @@ def extract_last_text(path: pathlib.Path) -> str:
     return texts[-1]
 
 
+def strip_allowlisted_transport_suffix(raw_text: str) -> str:
+    """Remove only the exact known non-authoritative transport suffix, if present."""
+    if raw_text.endswith(ALLOWED_TRANSPORT_SUFFIX):
+        return raw_text[: -len(ALLOWED_TRANSPORT_SUFFIX)].rstrip()
+    return raw_text
+
+
 def extract_decision(raw_text: str) -> object:
     """Return the sole authoritative JSON decision from the final model text.
 
     Prefer the historical strict contract where the complete final text is JSON.
     If that fails, permit non-authoritative prose only before a terminal JSON
-    object. A previous line containing a decision-shaped `verdict` key is
-    rejected so the controller never chooses between competing model decisions.
+    object. The exact allowlisted transport suffix may follow that object. A
+    previous line containing a decision-shaped `verdict` key is rejected so the
+    controller never chooses between competing model decisions.
     """
     if raw_text.startswith("```") or raw_text.endswith("```"):
         fail("Markdown/code fences are forbidden")
@@ -57,13 +71,14 @@ def extract_decision(raw_text: str) -> object:
     except json.JSONDecodeError:
         pass
 
-    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    stripped = strip_allowlisted_transport_suffix(raw_text)
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
     if not lines:
         fail("final text is empty")
 
     candidate = lines[-1]
     if not (candidate.startswith("{") and candidate.endswith("}")):
-        fail("final non-empty line is not a JSON object")
+        fail("final authoritative content is not a JSON object")
     if '"verdict"' in "\n".join(lines[:-1]):
         fail("multiple decision-shaped outputs are forbidden")
     if candidate.startswith("```") or candidate.endswith("```"):
