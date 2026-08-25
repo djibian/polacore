@@ -63,8 +63,9 @@ Repository artifacts:
 - `experiments/p117/`;
 - `tests/evil/p117_adversarial_probe.py`;
 - `docs/security/P117_ADVERSARIAL_EVIDENCE.md`;
-- `docs/security/P117_REVIEW.md`;
-- Security Evil Tests run `32233103096` for the retained adversarial change.
+- `docs/security/P117_REVIEW.md`.
+
+The probe is executed directly with `python3 tests/evil/p117_adversarial_probe.py`. No retained Security Evil Tests workflow currently invokes it, so workflow run `32233103096` is not P117 execution evidence and must not be used as such.
 
 Classification: narrow exact exercised containment cases are `PROVEN_BY_TEST`; enumeration-to-open object identity and implicit special-object rejection are `REFUTED`; privileged mount crossing and complete recursive materialization remain `UNPROVEN`.
 
