@@ -159,6 +159,8 @@ jobs:
       contents: read
       actions: read
       pull-requests: read
+    outputs:
+      decision_b64: ${{ steps.review.outputs.b64 }}
     env:
       GH_TOKEN: ${{ github.token }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -225,6 +227,7 @@ jobs:
         run: npm install --global opencode-ai@1.18.21
 
       - name: Run independent A0 Reviewer with bounded model fallback
+        id: review
         env:
           ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
         shell: bash
@@ -244,13 +247,28 @@ jobs:
             fi
           done
           "$ok" || { cat /tmp/a0-reviewer.jsonl >&2 || true; exit 1; }
+          echo "b64=$(base64 -w0 /tmp/a0-reviewer-decision.json)" >> "$GITHUB_OUTPUT"
           cat /tmp/a0-reviewer-decision.json
 
+  record-green-evidence:
+    needs: [deterministic-gate, wait-candidate-ci, independent-review]
+    if: needs.independent-review.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      DECISION_B64: ${{ needs.independent-review.outputs.decision_b64 }}
+    steps:
       - name: Record green A0 gate evidence on PR
-        env:
-          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          set -euo pipefail
+          printf '%s' "$DECISION_B64" | base64 --decode > /tmp/a0-reviewer-decision.json
           rationale="$(jq -r '.rationale' /tmp/a0-reviewer-decision.json | sed 's/@/@\u200b/g')"
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "### PolaCore A0 repair gate
 
