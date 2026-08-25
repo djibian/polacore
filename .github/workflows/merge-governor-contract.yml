@@ -1,0 +1,60 @@
+name: PolaCore Merge Governor Contract
+
+on:
+  pull_request:
+    branches: [engineering]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'config/merge_governor_policy_v1.json'
+      - 'docs/automation/MERGE_GOVERNOR.md'
+      - 'scripts/merge_governor.py'
+      - 'tests/test_merge_governor.py'
+      - '.github/workflows/merge-governor-contract.yml'
+  push:
+    branches: [engineering]
+    paths:
+      - 'config/merge_governor_policy_v1.json'
+      - 'docs/automation/MERGE_GOVERNOR.md'
+      - 'scripts/merge_governor.py'
+      - 'tests/test_merge_governor.py'
+      - '.github/workflows/merge-governor-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact candidate without persistent credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Parse workflow and strict policy JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e "require 'psych'; Psych.parse_file(ARGV.fetch(0))" .github/workflows/merge-governor-contract.yml
+          python3 -m json.tool config/merge_governor_policy_v1.json >/dev/null
+          python3 -m py_compile scripts/merge_governor.py tests/test_merge_governor.py
+
+      - name: Exercise positive and adversarial Governor contract
+        shell: bash
+        run: python3 -m unittest -v tests/test_merge_governor.py
+
+      - name: Prove the candidate contract has no publication authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(grep -c '^permissions:$' .github/workflows/merge-governor-contract.yml)" -eq 1
+          grep -A1 '^permissions:$' .github/workflows/merge-governor-contract.yml | grep -Fx '  contents: read' >/dev/null
+          if grep -E 'pull-requests: write|contents: write|actions: write|issues: write|id-token: write|secrets: inherit|gh pr merge|/pulls/.*/merge' \
+            .github/workflows/merge-governor-contract.yml >/dev/null; then
+            echo 'contract workflow gained publication, merge, or privileged authority' >&2
+            exit 1
+          fi
+          echo 'read-only exact-candidate contract verified; no merge authority is present.'

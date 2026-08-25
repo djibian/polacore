@@ -1,0 +1,94 @@
+{
+  "schema": "polacore.merge-governor-policy/v1",
+  "version": "2026-08-25.a1",
+  "repository": "djibian/polacore",
+  "integration_branch": "engineering",
+  "authorized_head_prefixes": [
+    "agent/task-",
+    "codex/attack/",
+    "codex/experiment/",
+    "codex/impl/",
+    "codex/test/"
+  ],
+  "assurance_order": [
+    "STANDARD",
+    "REINFORCED",
+    "CONSTITUTIONAL"
+  ],
+  "non_autonomous_profiles": [
+    "OBJECTIVE_AMENDMENT"
+  ],
+  "profiles": {
+    "STANDARD": {
+      "required_check_kinds": [
+        "TEST"
+      ],
+      "required_verdict_roles": [
+        "REVIEWER"
+      ]
+    },
+    "REINFORCED": {
+      "required_check_kinds": [
+        "SECURITY",
+        "TEST"
+      ],
+      "required_verdict_roles": [
+        "ADVERSARY",
+        "LAB",
+        "REVIEWER"
+      ]
+    },
+    "CONSTITUTIONAL": {
+      "required_check_kinds": [
+        "FORMAL",
+        "SECURITY",
+        "TEST"
+      ],
+      "required_verdict_roles": [
+        "ADVERSARY",
+        "LAB",
+        "REVIEWER"
+      ]
+    }
+  },
+  "path_assurance_floors": [
+    {
+      "pattern": "experiments/**",
+      "profile": "REINFORCED"
+    },
+    {
+      "pattern": "security/**",
+      "profile": "REINFORCED"
+    },
+    {
+      "pattern": "tests/evil/**",
+      "profile": "REINFORCED"
+    }
+  ],
+  "forbidden_exact_paths": [
+    "AGENTS.md",
+    "docs/ARCHITECTURE.md",
+    "docs/AUTONOMOUS_DEVELOPMENT.md",
+    "docs/PRODUCT.md",
+    "docs/PRODUCT_REQUIREMENTS.md",
+    "docs/SECURITY_LOG.md",
+    "docs/SECURITY_MODEL.md",
+    "opencode.json",
+    "scripts/merge_governor.py"
+  ],
+  "forbidden_path_prefixes": [
+    ".github/",
+    ".opencode/",
+    "config/merge_governor_",
+    "docs/automation/",
+    "docs/decisions/",
+    "docs/security/",
+    "scripts/agent_"
+  ],
+  "trusted_gate_paths": [
+    ".github/workflows/merge-governor-contract.yml",
+    "config/merge_governor_policy_v1.json",
+    "docs/automation/MERGE_GOVERNOR.md",
+    "scripts/merge_governor.py"
+  ]
+}
