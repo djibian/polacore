@@ -39,6 +39,8 @@ The certificate is built by the offline trusted-base contract documented in
 or policy, and the exact workflow path is part of every check and verdict.
 `MERGE_BUNDLE.md` specifies the separately digest-bound decision bundle and the
 non-authoritative intent that a future live controller may consume.
+`MERGE_CONTROLLER.md` specifies the pure journal/CAS protocol without granting
+or implementing live GitHub authority.
 
 ## Fail-closed rules
 
