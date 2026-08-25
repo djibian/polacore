@@ -65,6 +65,12 @@ jobs:
           grep -F 'ref: ${{ inputs.head_sha }}' .github/workflows/agent-reviewer-canary.yml >/dev/null
           grep -F 'contents: read' .github/workflows/agent-reviewer-canary.yml >/dev/null
           grep -F 'pull-requests: read' .github/workflows/agent-reviewer-canary.yml >/dev/null
+          grep -F -- '--model albert/deepseek-v4-flash' .github/workflows/agent-reviewer-canary.yml >/dev/null
+          grep -F 'model: albert/deepseek-v4-flash' .opencode/agents/reviewer-canary.md >/dev/null
+          if grep -F -- '--model albert/qwen3-coder-30b-A3b-instruct' .github/workflows/agent-reviewer-canary.yml >/dev/null; then
+            echo 'Operational Reviewer must not depend on Qwen quota' >&2
+            exit 1
+          fi
           if grep -F 'pull-requests: write' .github/workflows/agent-reviewer-canary.yml >/dev/null; then
             echo 'Reviewer analysis workflow must not have PR write authority' >&2
             exit 1
@@ -93,7 +99,7 @@ jobs:
           grep -Fx 'verdict=READY_FOR_HUMAN' /tmp/finalizer-output >/dev/null
           grep -Fx 'confidence=0.95' /tmp/finalizer-output >/dev/null
           grep -Fx 'ci_passed=true' /tmp/finalizer-output >/dev/null
-          echo 'CI/Reviewer workflow structure, authority boundaries, and finalizer handoff verified.'
+          echo 'CI/Reviewer workflow structure, DeepSeek model, authority boundaries, and finalizer handoff verified.'
 
   reviewer-contract:
     if: github.event.pull_request.head.repo.full_name == github.repository
@@ -158,7 +164,7 @@ jobs:
       - name: Install pinned OpenCode
         run: npm install --global opencode-ai@1.18.21
 
-      - name: Run read-only Reviewer contract
+      - name: Run read-only DeepSeek Reviewer contract
         env:
           ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
         shell: bash
@@ -166,7 +172,7 @@ jobs:
           set -euo pipefail
           opencode run \
             --agent reviewer-canary \
-            --model albert/qwen3-coder-30b-A3b-instruct \
+            --model albert/deepseek-v4-flash \
             --format json \
             'Review only the bounded evidence in agent-input/reviewer-context.md. Return the exact Reviewer JSON contract and nothing else.' \
             | tee /tmp/reviewer-selftest.jsonl
@@ -175,7 +181,7 @@ jobs:
           import json
           d=json.load(open('/tmp/reviewer-selftest-decision.json', encoding='utf-8'))
           assert d['verdict'] == 'READY_FOR_HUMAN', d
-          print('Reviewer READY_FOR_HUMAN contract verified.')
+          print('DeepSeek Reviewer READY_FOR_HUMAN contract verified.')
           PY
 
       - name: Prove malformed Reviewer output is rejected
