@@ -118,6 +118,12 @@ class MergeProviderCapabilityTests(unittest.TestCase):
                 mutate(evidence["ruleset"])
                 self.assertEqual(capability.assess(evidence)["decision"], "UNPROVEN")
 
+    def test_ruleset_identity_cannot_be_substituted(self) -> None:
+        evidence = fixture()
+        evidence["ruleset"]["id"] = 1
+        with self.assertRaises(governor.Rejected):
+            capability.assess(evidence)
+
     def test_required_squash_cannot_be_silently_changed(self) -> None:
         evidence = fixture()
         evidence["required_merge_method"] = "MERGE"
