@@ -37,6 +37,21 @@ MAX_RESPONSE_BYTES = 1_000_000
 Fetch = Callable[[str], tuple[dict[str, Any], dict[str, str]]]
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Prevent an Authorization header from being replayed to a redirect target."""
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> None:
+        return None
+
+
 def mapping(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         governor.reject(f"{label} must be an object")
@@ -227,7 +242,7 @@ def collect(fetch: Fetch, now: dt.datetime) -> dict[str, Any]:
 class GitHubGetClient:
     def __init__(self, token: str, opener: Any = None) -> None:
         self._token = governor.nonempty_string(token, "GitHub token", 10_000)
-        self._opener = opener or urllib.request.build_opener()
+        self._opener = opener or urllib.request.build_opener(NoRedirect())
 
     def fetch(self, path: str) -> tuple[dict[str, Any], dict[str, str]]:
         if path not in ALLOWED_PATHS:
