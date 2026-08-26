@@ -212,7 +212,7 @@ class MergeProviderCapabilityTests(unittest.TestCase):
         first = capability.assess(evidence)
         second = capability.assess(copy.deepcopy(evidence))
         self.assertEqual(first, second)
-        evidence["observed_at"] = "2026-08-26"
+        evidence["observed_at"] = "2026-08-27"
         self.assertNotEqual(first["evidence_sha256"], capability.assess(evidence)["evidence_sha256"])
 
 
