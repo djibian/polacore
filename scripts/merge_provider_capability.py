@@ -278,7 +278,8 @@ def validate_source(raw: Any) -> dict[str, Any]:
 
 def validate_ruleset(raw: Any, known_sources: set[str]) -> dict[str, Any]:
     ruleset = governor.exact_keys(raw, RULESET_KEYS, "provider ruleset")
-    governor.positive_int(ruleset["id"], "provider ruleset.id")
+    if governor.positive_int(ruleset["id"], "provider ruleset.id") != 21296946:
+        governor.reject("provider ruleset.id is not the governed engineering ruleset")
     if ruleset["enforcement"] not in {"ACTIVE", "DISABLED"}:
         governor.reject("provider ruleset enforcement is invalid")
     for key in (
@@ -293,7 +294,13 @@ def validate_ruleset(raw: Any, known_sources: set[str]) -> dict[str, Any]:
         boolean(ruleset[key], f"provider ruleset.{key}")
     nonnegative_int(ruleset["bypass_actor_count"], "provider ruleset.bypass_actor_count")
     methods = token_list(ruleset["allowed_merge_methods"], "provider ruleset.allowed_merge_methods")
-    token_list(ruleset["required_status_checks"], "provider ruleset.required_status_checks")
+    checks = governor.string_list(
+        ruleset["required_status_checks"], "provider ruleset.required_status_checks"
+    )
+    for index, check in enumerate(checks):
+        governor.nonempty_string(
+            check, f"provider ruleset.required_status_checks[{index}]", 100
+        )
     if any(method not in {"MERGE", "REBASE", "SQUASH"} for method in methods):
         governor.reject("provider ruleset contains an unsupported merge method")
     validate_source_references(ruleset["source_ids"], known_sources, "provider ruleset")
