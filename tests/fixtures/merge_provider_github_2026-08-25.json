@@ -5,7 +5,7 @@
   "repository_owner_type": "USER",
   "target_ref": "engineering",
   "required_merge_method": "SQUASH",
-  "observed_at": "2026-08-25",
+  "observed_at": "2026-08-26",
   "ruleset": {
     "id": 21296946,
     "enforcement": "ACTIVE",
@@ -21,8 +21,14 @@
       "SQUASH"
     ],
     "source_ids": [
-      "POLACORE_ENGINEERING_RULESET"
-    ]
+      "POLACORE_ENGINEERING_RULESET",
+      "POLACORE_STRICT_BASE_CANARY"
+    ],
+    "required_status_checks": [
+      "deterministic-contract"
+    ],
+    "strict_required_status": true,
+    "required_branch_up_to_date": true
   },
   "operations": [
     {
@@ -37,6 +43,23 @@
       "outcome_recovery": "FRESH_STATE_RECOVERABLE",
       "source_ids": [
         "GITHUB_PULL_MERGE_API"
+      ]
+    },
+    {
+      "id": "REST_PULL_MERGE_STRICT_RULESET",
+      "availability": "AVAILABLE",
+      "pull_request_precondition": "EXACT_PR",
+      "head_precondition": "EXACT_HEAD",
+      "base_precondition": "STRICT_REQUIRED_STATUS",
+      "protection_behavior": "RESPECTS_WITHOUT_BYPASS",
+      "merge_method": "SQUASH",
+      "audit_behavior": "PR_MERGED_EXACT_SHA",
+      "outcome_recovery": "FRESH_STATE_RECOVERABLE",
+      "source_ids": [
+        "GITHUB_PULL_MERGE_API",
+        "GITHUB_RULESET_DOCUMENTATION",
+        "POLACORE_ENGINEERING_RULESET",
+        "POLACORE_STRICT_BASE_CANARY"
       ]
     },
     {
@@ -96,7 +119,7 @@
       "GITHUB_PULL_MERGE_API"
     ]
   },
-  "selected_operation": null,
+  "selected_operation": "REST_PULL_MERGE_STRICT_RULESET",
   "sources": [
     {
       "id": "GITHUB_PULL_MERGE_API",
@@ -142,11 +165,26 @@
       "id": "POLACORE_ENGINEERING_RULESET",
       "kind": "GITHUB_AUTHENTICATED_REPOSITORY_STATE",
       "url": "https://api.github.com/repos/djibian/polacore/rulesets/21296946",
-      "retrieved_on": "2026-08-25",
+      "retrieved_on": "2026-08-26",
       "supports": [
         "ACTIVE_ENGINEERING_RULESET",
         "NO_BYPASS",
-        "PULL_REQUEST_REQUIRED"
+        "PULL_REQUEST_REQUIRED",
+        "STRICT_REQUIRED_STATUS",
+        "REQUIRED_BRANCH_UP_TO_DATE",
+        "DETERMINISTIC_CONTRACT_REQUIRED"
+      ]
+    },
+    {
+      "id": "POLACORE_STRICT_BASE_CANARY",
+      "kind": "GITHUB_AUTHENTICATED_REPOSITORY_STATE",
+      "url": "https://api.github.com/repos/djibian/polacore/commits/369396da9cc7fc9fd0c030a1a411b2df5bbfcf52",
+      "retrieved_on": "2026-08-26",
+      "supports": [
+        "BOUNDED_CANARY_ONLY",
+        "STALE_TESTED_HEAD_REJECTED_AFTER_BASE_ADVANCE",
+        "FRESH_CHECK_REQUIRED_AFTER_BRANCH_UPDATE",
+        "GLOBAL_REQUIRED_CHECK_LIVE"
       ]
     }
   ]
