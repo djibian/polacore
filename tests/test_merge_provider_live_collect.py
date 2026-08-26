@@ -211,6 +211,21 @@ class MergeProviderLiveCollectorTests(unittest.TestCase):
         with self.assertRaisesRegex(governor.Rejected, "allowlist"):
             client.fetch("/user")
 
+    def test_transport_refuses_redirects_before_replaying_authorization(self) -> None:
+        request = live.urllib.request.Request(
+            live.API_ROOT + live.REPOSITORY_PATH,
+            headers={"Authorization": "Bearer secret"},
+        )
+        redirected = live.NoRedirect().redirect_request(
+            request,
+            None,
+            302,
+            "Found",
+            {},
+            "https://attacker.invalid/collect",
+        )
+        self.assertIsNone(redirected)
+
     def test_evidence_and_assessment_are_deterministic_for_fixed_inputs(self) -> None:
         first = live.collect(fetcher(), NOW)
         second = live.collect(fetcher(), NOW)
