@@ -35,12 +35,14 @@ jobs:
             scripts/merge_governor.py \
             scripts/merge_observation_collect.py \
             scripts/merge_provider_capability.py \
+            scripts/merge_provider_live_collect.py \
             tests/test_merge_certificate_build.py \
             tests/test_merge_controller_protocol.py \
             tests/test_merge_decision_bundle.py \
             tests/test_merge_governor.py \
             tests/test_merge_observation_collect.py \
-            tests/test_merge_provider_capability.py
+            tests/test_merge_provider_capability.py \
+            tests/test_merge_provider_live_collect.py \
 
       - name: Exercise positive and adversarial Governor contract
         shell: bash
@@ -51,7 +53,8 @@ jobs:
             tests/test_merge_certificate_build.py \
             tests/test_merge_decision_bundle.py \
             tests/test_merge_controller_protocol.py \
-            tests/test_merge_provider_capability.py
+            tests/test_merge_provider_capability.py \
+            tests/test_merge_provider_live_collect.py
 
       - name: Prove the candidate contract has no publication authority
         shell: bash
