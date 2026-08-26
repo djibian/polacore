@@ -83,6 +83,17 @@ Issue #36 produced PR #46, merged into `engineering` at `d2c47d7dd053df3f460636c
 
 Classification: `VERIFIED_BY_CI` for the tested tool behavior and for one demonstrated end-to-end pilot path. It does not prove the generalized autonomous platform, which remains issue #47 work.
 
+### Strict engineering base freshness
+
+Claim: the active no-bypass ruleset prevents a PR tested on an older `engineering` base from merging after the base advances, and the required check is emitted for paths outside the former workflow filter.
+Classification: `VERIFIED_BY_CI` for the exact workflow runs and `VERIFIED_BY_PRIMARY_SOURCE` for GitHub's observed ruleset rejection; not a proof of the future controller journal or whole Merge Governor.
+Repository path/test: ruleset `21296946`; `.github/workflows/merge-governor-contract.yml`; concurrent PRs #57 and #58; global-trigger PR #60.
+Commit/PR: old base `e2b987dd0d42fd53143ae749d2726ecf3700cbeb`; first merge `80c311568580ac8166c3d340da12d8402403be79`; updated #57 head `0e22dd4ab1e92c3d3998acf72eddffde7ccf1930`; second merge `4cb1078daea67445f4713b15ba5a0c4db80cb8c8`; global workflow change `6f47bf39a14c19934f1f9f0e294aa41b66d365d8`.
+CI run: old-base runs `32938237905` and `32938239022`; updated-base run `32938375757`; global-trigger run recorded on PR #60.
+Environment: GitHub-hosted `ubuntu-24.04`; GitHub repository ruleset with strict required status and empty bypass list.
+Observed result: both concurrent PRs were initially green; after #58 advanced the base, GitHub rejected unchanged #57 with HTTP 405 and required a fresh `deterministic-contract`; after update and rerun, #57 merged. PR #60 changes only this previously unlisted path and therefore proves the required check is no longer path-filtered.
+Limits / remaining uncertainty: no durable monotone journal, least-privilege live controller, privileged workflow, or fresh product-task auto-merge is established by this canary.
+
 ## Evidence entry template
 
 When adding evidence, use:
