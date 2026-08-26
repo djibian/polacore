@@ -120,9 +120,6 @@ class MergeProviderLiveCollectorTests(unittest.TestCase):
             "wrong_check": lambda value: value["rules"][3]["parameters"].__setitem__(
                 "required_status_checks", [{"context": "other"}]
             ),
-            "missing_check_rule": lambda value: value.__setitem__(
-                "rules", value["rules"][:3]
-            ),
         }
         for name, mutate in mutations.items():
             with self.subTest(name=name):
@@ -136,6 +133,11 @@ class MergeProviderLiveCollectorTests(unittest.TestCase):
                 self.assertEqual(
                     by_id["REST_PULL_MERGE_STRICT_RULESET"]["status"], "UNPROVEN"
                 )
+
+        observed = ruleset()
+        observed["rules"] = observed["rules"][:3]
+        with self.assertRaises(governor.Rejected):
+            live.collect(fetcher(rules=observed), NOW)
 
     def test_ruleset_identity_target_and_source_are_fixed(self) -> None:
         mutations = {
