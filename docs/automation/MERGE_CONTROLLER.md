@@ -85,3 +85,16 @@ python3 -m unittest -v \
   tests/test_merge_decision_bundle.py \
   tests/test_merge_controller_protocol.py
 ```
+
+## Strict base-synchronization evidence
+
+A provider-enforced up-to-date branch requirement may discharge the base
+freshness part of the controller contract only after a concurrent canary
+establishes the complete transition: green on base A, blocked after
+`engineering` advances to base B, then green again only after the candidate is
+updated onto B and the required check reruns. A successful check name alone is
+not sufficient evidence.
+
+The controller must consume fresh authenticated protection and mergeability
+state and must never bypass the ruleset. This experiment does not establish the
+separate durable-journal obligation and does not grant merge authority.
