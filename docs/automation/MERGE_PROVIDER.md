@@ -85,3 +85,17 @@ python3 -m unittest -v \
   tests/test_merge_controller_protocol.py \
   tests/test_merge_provider_capability.py
 ```
+
+## Governed strict-status experiment (2026-08-26)
+
+Ruleset `21296946` now requires the GitHub Actions check
+`deterministic-contract` and uses strict required-status semantics: a pull
+request must be up to date with `engineering` before GitHub may merge it. The
+bypass list remains empty.
+
+This configuration statement is not evidence that the base race is closed. A
+synthetic concurrent canary must first show that a second pull request which was
+green on the old base becomes non-mergeable after the first pull request moves
+`engineering`, and becomes eligible again only after its branch is updated and
+the required check reruns. Until that observation is recorded on issue #48, the
+provider operation remains `UNPROVEN`.
