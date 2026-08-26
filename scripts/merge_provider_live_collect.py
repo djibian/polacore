@@ -272,7 +272,7 @@ def main() -> None:
     try:
         client = GitHubGetClient(token)
         result = collect(client.fetch, dt.datetime.now(dt.timezone.utc))
-        status = 0 if result["assessment"]["decision"] == "ELIGIBLE" else 3
+        # Collection success is distinct from merge eligibility. A truthful\n        # UNPROVEN assessment is successful observation, not a CI failure.\n        status = 0
     except (governor.Rejected, ValueError) as exc:
         result = {"decision": "UNPROVEN", "reason": str(exc)}
         status = 2
