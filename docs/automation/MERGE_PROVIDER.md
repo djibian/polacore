@@ -88,14 +88,30 @@ python3 -m unittest -v \
 
 ## Governed strict-status experiment (2026-08-26)
 
-Ruleset `21296946` now requires the GitHub Actions check
+Ruleset `21296946` requires the GitHub Actions check
 `deterministic-contract` and uses strict required-status semantics: a pull
 request must be up to date with `engineering` before GitHub may merge it. The
 bypass list remains empty.
 
-This configuration statement is not evidence that the base race is closed. A
-synthetic concurrent canary must first show that a second pull request which was
-green on the old base becomes non-mergeable after the first pull request moves
-`engineering`, and becomes eligible again only after its branch is updated and
-the required check reruns. Until that observation is recorded on issue #48, the
-provider operation remains `UNPROVEN`.
+The concurrent canary established the provider-enforced base transition:
+
+- PR #58 head `e7139435f015ac089a4c812feb88385de6a3cf21` and PR #57
+  head `fb692a464041c0d87cb16390c25ff7e51ec3406d` both passed the required
+  check on base `e2b987dd0d42fd53143ae749d2726ecf3700cbeb` in runs
+  `32938239022` and `32938237905`;
+- merging #58 advanced `engineering` to
+  `80c311568580ac8166c3d340da12d8402403be79`;
+- #57 then became one commit behind and GitHub rejected the unchanged-head
+  squash request with HTTP 405 because required check `deterministic-contract`
+  was expected;
+- updating #57 onto the new base produced exact head
+  `0e22dd4ab1e92c3d3998acf72eddffde7ccf1930`, whose fresh required check
+  passed in run `32938375757` before GitHub accepted the squash merge to
+  `4cb1078daea67445f4713b15ba5a0c4db80cb8c8`.
+
+This is bounded evidence that the current no-bypass strict ruleset prevents an
+unchanged PR head which was tested on an older base from being merged after
+`engineering` advances. It does not establish a durable journal or grant a
+controller permission. The required workflow must run for every PR targeting
+`engineering`; path-filtered required checks would deadlock unrelated product
+changes.
