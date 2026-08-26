@@ -140,3 +140,41 @@ The fixture keeps `BOUNDED_CANARY_ONLY` in the trusted source semantics.
 Removing that marker, changing the required check, disabling strict
 up-to-date behavior, adding bypass authority or substituting candidate claims
 fails closed.
+
+
+## Authenticated read-only collector boundary (2026-08-26)
+
+`scripts/merge_provider_live_collect.py` is the first live-capable trusted-base
+adapter. It has exactly two allowlisted `GET` endpoints:
+
+- `/repos/djibian/polacore`;
+- `/repos/djibian/polacore/rulesets/21296946`.
+
+It requires a non-empty token, sends GitHub's JSON media type and API-version
+headers, requires an authenticated request ID, bounds each response to 1 MB,
+rejects redirects and cannot accept a repository, endpoint or HTTP method from
+candidate input. It contains no checkout, subprocess, candidate execution,
+write request, workflow mutation, journal or merge operation.
+
+The parser binds the repository identity, owner type, squash availability,
+ruleset id/name/source/target, exact `engineering` condition, enforcement,
+pull-request rule, deletion/non-fast-forward rules, strict required-status
+semantics and exact `deterministic-contract` context. Duplicate or ambiguous
+rules fail closed.
+
+A primary-source limitation is intentionally preserved: GitHub documents that
+`GET /repos/{owner}/{repo}/rulesets/{ruleset_id}` needs only Metadata read,
+but omits `bypass_actors` unless the caller has write access to the ruleset.
+The collector treats an omitted field as `UNPROVEN`, never as an empty list.
+It does not request or create that stronger authority.
+
+Primary sources:
+
+- [GitHub REST authentication](https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api)
+- [GitHub repository-rules endpoints](https://docs.github.com/en/rest/repos/rules#get-a-repository-ruleset)
+- [GitHub ruleset rule semantics](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)
+
+This lot installs no workflow that exposes a token to candidate code and performs
+no live merge. A later trusted-base invocation must demonstrate the exact
+read-only response shape; the durable journal and action controller remain
+`UNPROVEN`.
