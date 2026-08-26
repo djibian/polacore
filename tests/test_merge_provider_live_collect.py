@@ -112,7 +112,7 @@ class MergeProviderLiveCollectorTests(unittest.TestCase):
         self.assertEqual(by_id["REST_PULL_MERGE_STRICT_RULESET"]["status"], "UNPROVEN")
         self.assertTrue(result["evidence"]["ruleset"]["current_actor_can_bypass"])
 
-    def test_strict_check_and_latest-base_requirement_are_exact(self) -> None:
+    def test_strict_check_and_latest_base_requirement_are_exact(self) -> None:
         mutations = {
             "not_strict": lambda value: value["rules"][3]["parameters"].__setitem__(
                 "strict_required_status_checks_policy", False
