@@ -42,7 +42,7 @@ jobs:
             tests/test_merge_governor.py \
             tests/test_merge_observation_collect.py \
             tests/test_merge_provider_capability.py \
-            tests/test_merge_provider_live_collect.py \
+            tests/test_merge_provider_live_collect.py
 
       - name: Exercise positive and adversarial Governor contract
         shell: bash
