@@ -44,6 +44,9 @@ RULESET_KEYS = {
     "bypass_actor_count",
     "current_actor_can_bypass",
     "allowed_merge_methods",
+    "required_status_checks",
+    "strict_required_status",
+    "required_branch_up_to_date",
     "source_ids",
 }
 OPERATION_KEYS = {
@@ -102,6 +105,22 @@ KNOWN_OPERATION_CONTRACTS = {
         "audit_behavior": "PR_MERGED_EXACT_SHA",
         "outcome_recovery": "FRESH_STATE_RECOVERABLE",
         "source_ids": ["GITHUB_PULL_MERGE_API"],
+    },
+    "REST_PULL_MERGE_STRICT_RULESET": {
+        "availability": "AVAILABLE",
+        "pull_request_precondition": "EXACT_PR",
+        "head_precondition": "EXACT_HEAD",
+        "base_precondition": "STRICT_REQUIRED_STATUS",
+        "protection_behavior": "RESPECTS_WITHOUT_BYPASS",
+        "merge_method": "SQUASH",
+        "audit_behavior": "PR_MERGED_EXACT_SHA",
+        "outcome_recovery": "FRESH_STATE_RECOVERABLE",
+        "source_ids": [
+            "GITHUB_PULL_MERGE_API",
+            "GITHUB_RULESET_DOCUMENTATION",
+            "POLACORE_ENGINEERING_RULESET",
+            "POLACORE_STRICT_BASE_CANARY",
+        ],
     },
     "REST_PULL_MERGE_ASYNC": {
         "availability": "AVAILABLE",
@@ -172,7 +191,24 @@ KNOWN_SOURCE_CONTRACTS = {
     "POLACORE_ENGINEERING_RULESET": {
         "kind": "GITHUB_AUTHENTICATED_REPOSITORY_STATE",
         "url": "https://api.github.com/repos/djibian/polacore/rulesets/21296946",
-        "supports": ["ACTIVE_ENGINEERING_RULESET", "NO_BYPASS", "PULL_REQUEST_REQUIRED"],
+        "supports": [
+            "ACTIVE_ENGINEERING_RULESET",
+            "NO_BYPASS",
+            "PULL_REQUEST_REQUIRED",
+            "STRICT_REQUIRED_STATUS",
+            "REQUIRED_BRANCH_UP_TO_DATE",
+            "DETERMINISTIC_CONTRACT_REQUIRED",
+        ],
+    },
+    "POLACORE_STRICT_BASE_CANARY": {
+        "kind": "GITHUB_AUTHENTICATED_REPOSITORY_STATE",
+        "url": "https://api.github.com/repos/djibian/polacore/commits/369396da9cc7fc9fd0c030a1a411b2df5bbfcf52",
+        "supports": [
+            "BOUNDED_CANARY_ONLY",
+            "STALE_TESTED_HEAD_REJECTED_AFTER_BASE_ADVANCE",
+            "FRESH_CHECK_REQUIRED_AFTER_BRANCH_UPDATE",
+            "GLOBAL_REQUIRED_CHECK_LIVE",
+        ],
     },
 }
 
@@ -242,7 +278,8 @@ def validate_source(raw: Any) -> dict[str, Any]:
 
 def validate_ruleset(raw: Any, known_sources: set[str]) -> dict[str, Any]:
     ruleset = governor.exact_keys(raw, RULESET_KEYS, "provider ruleset")
-    governor.positive_int(ruleset["id"], "provider ruleset.id")
+    if governor.positive_int(ruleset["id"], "provider ruleset.id") != 21296946:
+        governor.reject("provider ruleset.id is not the governed engineering ruleset")
     if ruleset["enforcement"] not in {"ACTIVE", "DISABLED"}:
         governor.reject("provider ruleset enforcement is invalid")
     for key in (
@@ -251,10 +288,19 @@ def validate_ruleset(raw: Any, known_sources: set[str]) -> dict[str, Any]:
         "deletion_forbidden",
         "merge_queue_required",
         "current_actor_can_bypass",
+        "strict_required_status",
+        "required_branch_up_to_date",
     ):
         boolean(ruleset[key], f"provider ruleset.{key}")
     nonnegative_int(ruleset["bypass_actor_count"], "provider ruleset.bypass_actor_count")
     methods = token_list(ruleset["allowed_merge_methods"], "provider ruleset.allowed_merge_methods")
+    checks = governor.string_list(
+        ruleset["required_status_checks"], "provider ruleset.required_status_checks"
+    )
+    for index, check in enumerate(checks):
+        governor.nonempty_string(
+            check, f"provider ruleset.required_status_checks[{index}]", 100
+        )
     if any(method not in {"MERGE", "REBASE", "SQUASH"} for method in methods):
         governor.reject("provider ruleset contains an unsupported merge method")
     validate_source_references(ruleset["source_ids"], known_sources, "provider ruleset")
@@ -271,7 +317,7 @@ def validate_operation(raw: Any, known_sources: set[str]) -> dict[str, Any]:
         "availability": {"AVAILABLE", "UNAVAILABLE"},
         "pull_request_precondition": {"EXACT_PR", "NONE"},
         "head_precondition": {"EXACT_HEAD", "CURRENT_HEAD", "NONE"},
-        "base_precondition": {"EXACT_BASE", "FAST_FORWARD_ONLY", "LATEST_BASE", "NONE"},
+        "base_precondition": {"EXACT_BASE", "STRICT_REQUIRED_STATUS", "FAST_FORWARD_ONLY", "LATEST_BASE", "NONE"},
         "protection_behavior": {"RESPECTS_WITHOUT_BYPASS", "UNPROVEN", "BYPASS"},
         "merge_method": {"SQUASH", "MERGE", "REBASE", "PROVIDER_SELECTED", "UNPROVEN"},
         "audit_behavior": {"PR_MERGED_EXACT_SHA", "QUEUE_ENTRY", "REF_UPDATE_ONLY", "UNPROVEN"},
@@ -362,11 +408,17 @@ def validate_evidence(raw: Any) -> dict[str, Any]:
 
 
 def operation_reasons(operation: dict[str, Any]) -> list[str]:
-    return [
-        f"{key}={operation[key]} requires {required}"
-        for key, required in REQUIRED_OPERATION.items()
-        if operation[key] != required
-    ]
+    reasons = []
+    for key, required in REQUIRED_OPERATION.items():
+        observed = operation[key]
+        if key == "base_precondition":
+            if observed not in {"EXACT_BASE", "STRICT_REQUIRED_STATUS"}:
+                reasons.append(
+                    f"{key}={observed} requires EXACT_BASE or STRICT_REQUIRED_STATUS"
+                )
+        elif observed != required:
+            reasons.append(f"{key}={observed} requires {required}")
+    return reasons
 
 
 def ruleset_reasons(ruleset: dict[str, Any]) -> list[str]:
@@ -378,12 +430,16 @@ def ruleset_reasons(ruleset: dict[str, Any]) -> list[str]:
         "deletion_forbidden": True,
         "current_actor_can_bypass": False,
         "bypass_actor_count": 0,
+        "strict_required_status": True,
+        "required_branch_up_to_date": True,
     }
     for key, expected in required.items():
         if ruleset[key] != expected:
             reasons.append(f"ruleset.{key}={ruleset[key]} requires {expected}")
     if "SQUASH" not in ruleset["allowed_merge_methods"]:
         reasons.append("ruleset does not allow SQUASH")
+    if ruleset["required_status_checks"] != ["deterministic-contract"]:
+        reasons.append("ruleset.required_status_checks must be exactly deterministic-contract")
     return reasons
 
 

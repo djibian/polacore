@@ -39,9 +39,18 @@ Primary sources:
 - [GitHub ruleset rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)
 - [Observed PolaCore engineering ruleset](https://api.github.com/repos/djibian/polacore/rulesets/21296946)
 
-The resulting decision is `UNPROVEN`. In particular, a fresh read immediately
-followed by `PUT /pulls/{number}/merge` must not be relabeled as atomic
-base-and-head CAS.
+The 2026-08-26 governed canary adds one bounded composite operation:
+`REST_PULL_MERGE_STRICT_RULESET`. It combines the head-bound pull-request
+merge API with the current no-bypass ruleset's strict required-status behavior.
+The operation is eligible for the provider-operation portion of the contract
+only while the authenticated ruleset observation establishes the exact required
+check, strict up-to-date semantics, no bypass and the reproduced stale-base
+rejection. It is deliberately recorded as `STRICT_REQUIRED_STATUS`, not
+`EXACT_BASE`: the API still exposes no exact-base parameter.
+
+The overall decision remains `UNPROVEN` because no durable monotone journal is
+established. A fresh read followed by `PUT /pulls/{number}/merge` without that
+strict ruleset evidence must never be relabeled as atomic base-and-head CAS.
 
 ## Eligibility contract
 
@@ -49,7 +58,7 @@ An operation is eligible only when primary evidence establishes all of these
 properties without inference:
 
 - available for this repository;
-- exact PR, head SHA and base SHA preconditions in the write transaction;
+- exact PR and head SHA preconditions, plus either an exact-base transaction or the separately authenticated strict required-status guard demonstrated by the bounded canary;
 - protection-respecting behavior without bypass;
 - required squash method;
 - exact merged-PR audit result;
@@ -68,8 +77,7 @@ operation selection fail closed.
 
 ## Decision boundary
 
-No current operation is selected and no live adapter may be installed from
-this evidence. Resolving the gap may require a repository-governance change,
+The strict-ruleset composite is selected only as the currently supported provider operation; the complete assessment remains `UNPROVEN` and no live adapter may be installed from this evidence. Resolving the gap may require a repository-governance change,
 an organization/merge-queue model with recertification, or a separately proven
 GitHub App and journal. Those choices affect rulesets, external authority or
 the exact-base policy and therefore remain outside autonomous scope.
@@ -115,3 +123,20 @@ unchanged PR head which was tested on an older base from being merged after
 controller permission. The required workflow must run for every PR targeting
 `engineering`; path-filtered required checks would deadlock unrelated product
 changes.
+
+## Reconciled capability boundary (2026-08-26)
+
+The registry now distinguishes the following claims:
+
+- `VERIFIED_BY_PRIMARY_SOURCE`: the merge endpoint binds the requested PR head SHA and respects repository protection;
+- `PROVEN_BY_TEST` within this repository configuration: after
+  `engineering` advances, a previously green unchanged head becomes ineligible
+  until its branch is updated and `deterministic-contract` passes again;
+- `UNPROVEN`: an API-level exact-base CAS, a durable
+  `PREPARED -> COMPLETED` journal, least-privilege live controller recovery,
+  and end-to-end unattended integration.
+
+The fixture keeps `BOUNDED_CANARY_ONLY` in the trusted source semantics.
+Removing that marker, changing the required check, disabling strict
+up-to-date behavior, adding bypass authority or substituting candidate claims
+fails closed.
