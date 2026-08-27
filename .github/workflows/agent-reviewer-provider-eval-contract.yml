@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - codex/experiment/65-albert-reviewer-eval
+      - codex/experiment/65-reviewer-eval-control-trigger
   workflow_dispatch:
 
 permissions:
@@ -72,7 +73,9 @@ jobs:
           workflow='.github/workflows/agent-reviewer-provider-eval.yml'
           agent='.opencode/agents/reviewer-provider-eval.md'
           grep -F 'workflow_dispatch:' "$workflow" >/dev/null
-          ! grep -Eq '^  (push|pull_request|issues|issue_comment|schedule):' "$workflow"
+          grep -F 'issue_comment:' "$workflow" >/dev/null
+          grep -F 'types: [created]' "$workflow" >/dev/null
+          ! grep -Eq '^  (push|pull_request|issues|schedule):' "$workflow"
           grep -F 'contents: read' "$workflow" >/dev/null
           grep -F 'pull-requests: read' "$workflow" >/dev/null
           grep -F "test \"\$GITHUB_REF\" = 'refs/heads/engineering'" "$workflow" >/dev/null
@@ -87,6 +90,15 @@ jobs:
           from pathlib import Path
           text = Path('.github/workflows/agent-reviewer-provider-eval.yml').read_text()
           assert ('ref: $' + '{{ github.sha }}') in text
+          required = [
+              "github.event_name == 'issue_comment'",
+              'github.event.issue.number == 65',
+              'github.event.issue.pull_request == null',
+              "github.event.comment.body == '/run-albert-reviewer-eval'",
+              'github.actor == github.repository_owner',
+          ]
+          for needle in required:
+              assert needle in text, needle
           def step(name):
               marker = f'      - name: {name}\n'
               start = text.index(marker)
