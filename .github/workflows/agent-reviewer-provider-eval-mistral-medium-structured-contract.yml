@@ -1,0 +1,160 @@
+name: PolaCore Mistral Medium Structured Reviewer Contract
+
+on:
+  push:
+    branches:
+      - codex/experiment/65-mistral-medium-json-schema-transport
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Lab SHA with history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch exact historical corpus commits without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for sha in \
+            86d66be36f4ea10a0a83b7fac1639951f1df72c1 \
+            884ef3c07c9c19f13d11bbbe1dbc3211f748b586 \
+            4236ed98f937b1e1fd9dcaefddffe711f0673a8f; do
+            git fetch --no-tags --no-recurse-submodules origin "$sha"
+            git cat-file -e "${sha}^{commit}"
+          done
+
+      - name: Prove unchanged scorer and shared structured transport tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile \
+            scripts/reviewer_provider_eval.py \
+            scripts/reviewer_provider_eval_mistral_medium.py \
+            scripts/reviewer_provider_structured_transport.py \
+            scripts/reviewer_provider_structured_transport_mistral_medium.py \
+            scripts/agent_reviewer_validate.py \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_structured_transport.py
+          python3 -m unittest -v \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_structured_transport.py
+
+      - name: Prove Mistral Medium binding changes only model identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0,'scripts')
+          import reviewer_provider_eval_mistral_medium as e
+          import reviewer_provider_structured_transport_mistral_medium as t
+          model='Mistral-Medium-3.5-128B'
+          assert e.MISTRAL_MEDIUM_MODEL == model
+          assert e.base.MODEL == model
+          assert t.MISTRAL_MEDIUM_MODEL == model
+          assert t.base.MODEL == model
+          request=t.base.build_request('bounded evidence','trusted system')
+          assert request['model'] == model
+          assert request['tool_choice'] == 'none'
+          assert 'tools' not in request
+          rf=request['response_format']
+          assert rf['type'] == 'json_schema'
+          assert rf['json_schema']['strict'] is True
+          schema=rf['json_schema']['schema']
+          assert schema['required'] == ['verdict','confidence','rationale']
+          assert schema['additionalProperties'] is False
+          assert schema['properties']['rationale']['minLength'] == 20
+          assert schema['properties']['rationale']['maxLength'] == 800
+          PY
+
+      - name: Materialize identical blind historical candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A expected=(
+            [H1]='86d66be36f4ea10a0a83b7fac1639951f1df72c1'
+            [H2]='884ef3c07c9c19f13d11bbbe1dbc3211f748b586'
+            [H3]='4236ed98f937b1e1fd9dcaefddffe711f0673a8f'
+            [H4]='7fce52d8b8fd7e3a26e79d9609847f63a8fc38ce'
+          )
+          for case in H1 H2 H3 H4; do
+            out="/tmp/provider-eval-${case}"
+            rm -rf "$out"
+            python3 scripts/reviewer_provider_eval_mistral_medium.py materialize --case "$case" --out "$out"
+            test -s "$out/reviewer-context.md"
+            test -s "$out/candidate.py"
+            grep -F "Exact candidate SHA: ${expected[$case]}" "$out/reviewer-context.md" >/dev/null
+            ! grep -F 'c790315c92663aa7b15b9a626ae5d9fc07d3e378' "$out/reviewer-context.md"
+            ! grep -F '9a653e50d1bec813ae738106cd65e0b2cde29dcb' "$out/reviewer-context.md"
+            ! grep -F 'a821bcae50dadfd3f4d758056585162065d6ea30' "$out/reviewer-context.md"
+          done
+
+      - name: Prove trusted exact-SHA read-only token boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow='.github/workflows/agent-reviewer-provider-eval-mistral-medium-structured.yml'
+          eval_binding='scripts/reviewer_provider_eval_mistral_medium.py'
+          transport_binding='scripts/reviewer_provider_structured_transport_mistral_medium.py'
+          grep -F 'workflow_dispatch:' "$workflow" >/dev/null
+          grep -F 'issue_comment:' "$workflow" >/dev/null
+          grep -F "github.event.comment.body == '/run-albert-reviewer-eval-mistral-medium-structured'" "$workflow" >/dev/null
+          grep -F 'github.actor == github.repository_owner' "$workflow" >/dev/null
+          grep -F 'contents: read' "$workflow" >/dev/null
+          grep -F 'pull-requests: read' "$workflow" >/dev/null
+          grep -F 'persist-credentials: false' "$workflow" >/dev/null
+          grep -F 'https://albert.api.etalab.gouv.fr/v1/chat/completions' "$workflow" >/dev/null
+          grep -F 'Mistral-Medium-3.5-128B' "$eval_binding" "$transport_binding" "$workflow" >/dev/null
+          ! grep -F 'opencode run' "$workflow"
+          ! grep -F 'npm install' "$workflow"
+          ! grep -Eq 'contents: write|pull-requests: write|issues: write|actions: write|checks: write|statuses: write|id-token: write' "$workflow"
+          ! grep -F 'c790315c92663aa7b15b9a626ae5d9fc07d3e378' "$eval_binding" "$transport_binding" "$workflow"
+          ! grep -F '9a653e50d1bec813ae738106cd65e0b2cde29dcb' "$eval_binding" "$transport_binding" "$workflow"
+          ! grep -F 'a821bcae50dadfd3f4d758056585162065d6ea30' "$eval_binding" "$transport_binding" "$workflow"
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('.github/workflows/agent-reviewer-provider-eval-mistral-medium-structured.yml').read_text()
+          assert ('ref: $' + '{{ github.sha }}') in text
+          assert 'scripts/agent_reviewer_validate.py' in text
+          def step(name):
+              marker=f'      - name: {name}\n'
+              start=text.index(marker)
+              end=text.find('      - name:',start+len(marker))
+              return text[start:] if end < 0 else text[start:end]
+          historical=step('Evaluate blind historical corpus with Structured Outputs')
+          collect=step('Materialize fresh PR 64 without Albert secret')
+          fresh=step('Evaluate fresh PR 64 with Structured Outputs')
+          assert 'ALBERT_API_KEY:' in historical and 'GH_TOKEN:' not in historical
+          assert 'GH_TOKEN:' in collect and 'ALBERT_API_KEY:' not in collect
+          assert 'ALBERT_API_KEY:' in fresh and 'GH_TOKEN:' not in fresh
+          PY
+
+      - name: Report dry-contract identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "lab_sha=$(git rev-parse HEAD)"
+          sha256sum \
+            scripts/reviewer_provider_eval.py \
+            scripts/reviewer_provider_eval_mistral_medium.py \
+            scripts/reviewer_provider_structured_transport.py \
+            scripts/reviewer_provider_structured_transport_mistral_medium.py \
+            scripts/agent_reviewer_validate.py \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_structured_transport.py \
+            .opencode/agents/reviewer-provider-eval-mistral.md \
+            .github/workflows/agent-reviewer-provider-eval-mistral-medium-structured.yml \
+            .github/workflows/agent-reviewer-provider-eval-mistral-medium-structured-contract.yml
