@@ -70,8 +70,7 @@ jobs:
             status=$?
             set -e
             if [ "$status" -ne 0 ]; then
-              reason="$(tail -c 400 /tmp/provider-eval/${case}.stderr || true)"
-              python3 scripts/reviewer_provider_eval.py provider-failure --case "$case" --reason "$reason" \
+              python3 scripts/reviewer_provider_eval.py provider-failure --case "$case" --reason "model/provider invocation exited nonzero" \
                 --out "/tmp/provider-eval/results/${case}.json"
               provider_failed=true
               break
@@ -143,9 +142,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "trusted_runner_sha=$(git rev-parse HEAD)"
-          echo 'provider=albert'
-          echo 'model=deepseek-v4-flash'
+          runner_sha="$(git rev-parse HEAD)"
+          agent_sha="$(sha256sum .opencode/agents/reviewer-provider-eval.md | awk '{print $1}')"
+          workflow_sha="$(sha256sum .github/workflows/agent-reviewer-provider-eval.yml | awk '{print $1}')"
+          printf 'trusted_runner_sha=%s\nreviewer_agent_sha256=%s\nworkflow_sha256=%s\nprovider=albert\nmodel=deepseek-v4-flash\n' \
+            "$runner_sha" "$agent_sha" "$workflow_sha"
           for f in /tmp/provider-eval/results/*.json /tmp/provider-eval/summary.json /tmp/provider-eval/F1.decision.json; do
             if [ -f "$f" ]; then echo "--- $f"; cat "$f"; fi
           done
