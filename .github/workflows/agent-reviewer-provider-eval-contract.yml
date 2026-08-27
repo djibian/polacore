@@ -5,6 +5,7 @@ on:
     branches:
       - codex/experiment/65-albert-reviewer-eval
       - codex/experiment/65-reviewer-eval-control-trigger
+      - codex/experiment/65-eval-output-contract-repair
   workflow_dispatch:
 
 permissions:
@@ -89,6 +90,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           text = Path('.github/workflows/agent-reviewer-provider-eval.yml').read_text()
+          scorer = Path('scripts/reviewer_provider_eval.py').read_text()
           assert ('ref: $' + '{{ github.sha }}') in text
           required = [
               "github.event_name == 'issue_comment'",
@@ -99,6 +101,11 @@ jobs:
           ]
           for needle in required:
               assert needle in text, needle
+          assert 'MODEL_OUTPUT_INVALID' in scorer
+          assert 'model-output-invalid' in text
+          assert '.validator.stderr' in text
+          assert 'continue' in text
+          assert 'and not invalid_cases' in scorer
           def step(name):
               marker = f'      - name: {name}\n'
               start = text.index(marker)

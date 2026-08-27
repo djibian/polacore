@@ -194,14 +194,35 @@ def provider_failure(case_name: str, reason: str) -> dict[str, Any]:
     }
 
 
+def model_output_invalid(case_name: str, reason: str) -> dict[str, Any]:
+    if case_name not in CASES and case_name != "F1":
+        raise SystemExit(f"unknown case: {case_name}")
+    return {
+        "schema": SCHEMA,
+        "case": case_name,
+        "provider": PROVIDER,
+        "model": MODEL,
+        "status": "MODEL_OUTPUT_INVALID",
+        "reason": " ".join(reason.split())[:500],
+    }
+
+
 def summarize(paths: list[pathlib.Path]) -> dict[str, Any]:
     rows = [json.loads(p.read_text(encoding="utf-8")) for p in paths]
     by_case = {row.get("case"): row for row in rows}
     historical = [by_case.get(x, {}) for x in ("H1", "H2", "H3")]
     provider_failed = any(row.get("status") == "PROVIDER_FAILURE" for row in rows)
+    invalid_cases = sorted(
+        str(row.get("case")) for row in rows if row.get("status") == "MODEL_OUTPUT_INVALID"
+    )
     detected = sum(row.get("status") == "DETECTED" for row in historical)
     h4 = by_case.get("H4", {})
-    qualified = (not provider_failed and detected == 3 and h4.get("status") == "CLEAN_CONTROL")
+    qualified = (
+        not provider_failed
+        and not invalid_cases
+        and detected == 3
+        and h4.get("status") == "CLEAN_CONTROL"
+    )
     return {
         "schema": SCHEMA,
         "provider": PROVIDER,
@@ -210,6 +231,8 @@ def summarize(paths: list[pathlib.Path]) -> dict[str, Any]:
         "historical_total": 3,
         "negative_control": h4.get("status", "MISSING"),
         "provider_failure": provider_failed,
+        "model_output_invalid": bool(invalid_cases),
+        "invalid_model_output_cases": invalid_cases,
         "result": "QUALIFIED_FOR_REPEAT" if qualified else "NOT_QUALIFIED",
         "note": "A single qualified run does not authorize provider migration.",
     }
@@ -233,6 +256,10 @@ def main() -> None:
     q.add_argument("--case", required=True)
     q.add_argument("--reason", required=True)
     q.add_argument("--out", required=True, type=pathlib.Path)
+    m = sub.add_parser("model-output-invalid")
+    m.add_argument("--case", required=True)
+    m.add_argument("--reason", required=True)
+    m.add_argument("--out", required=True, type=pathlib.Path)
     z = sub.add_parser("summarize")
     z.add_argument("--inputs", nargs="+", required=True, type=pathlib.Path)
     z.add_argument("--out", required=True, type=pathlib.Path)
@@ -248,6 +275,8 @@ def main() -> None:
         result = score(args.case, args.decision)
     elif args.cmd == "provider-failure":
         result = provider_failure(args.case, args.reason)
+    elif args.cmd == "model-output-invalid":
+        result = model_output_invalid(args.case, args.reason)
     else:
         result = summarize(args.inputs)
     args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

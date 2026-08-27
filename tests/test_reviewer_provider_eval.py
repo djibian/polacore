@@ -52,6 +52,7 @@ class ReviewerProviderEvalTest(unittest.TestCase):
             p.write_text(json.dumps({"case":case,"status":status}),encoding="utf-8"); paths.append(p)
         s=mod.summarize(paths)
         self.assertEqual(s["result"], "QUALIFIED_FOR_REPEAT")
+        self.assertFalse(s["model_output_invalid"])
         self.assertIn("does not authorize provider migration", s["note"])
 
     def test_provider_failure_is_not_qualification(self):
@@ -65,7 +66,30 @@ class ReviewerProviderEvalTest(unittest.TestCase):
         paths=[]
         for i,row in enumerate(rows):
             p=pathlib.Path(td.name)/f"{i}.json"; p.write_text(json.dumps(row),encoding="utf-8"); paths.append(p)
-        self.assertEqual(mod.summarize(paths)["result"], "NOT_QUALIFIED")
+        s=mod.summarize(paths)
+        self.assertEqual(s["result"], "NOT_QUALIFIED")
+        self.assertTrue(s["provider_failure"])
+        self.assertFalse(s["model_output_invalid"])
+
+    def test_invalid_model_output_is_distinct_and_fail_closed(self):
+        row = mod.model_output_invalid("H1", "reviewer output rejected: rationale must contain 20-800 characters")
+        self.assertEqual(row["status"], "MODEL_OUTPUT_INVALID")
+        self.assertNotEqual(row["status"], "PROVIDER_FAILURE")
+        td=tempfile.TemporaryDirectory(); self.addCleanup(td.cleanup)
+        rows=[
+            row,
+            {"case":"H2","status":"DETECTED"},
+            {"case":"H3","status":"DETECTED"},
+            {"case":"H4","status":"CLEAN_CONTROL"},
+        ]
+        paths=[]
+        for i,item in enumerate(rows):
+            p=pathlib.Path(td.name)/f"{i}.json"; p.write_text(json.dumps(item),encoding="utf-8"); paths.append(p)
+        s=mod.summarize(paths)
+        self.assertEqual(s["result"], "NOT_QUALIFIED")
+        self.assertFalse(s["provider_failure"])
+        self.assertTrue(s["model_output_invalid"])
+        self.assertEqual(s["invalid_model_output_cases"], ["H1"])
 
 if __name__ == "__main__":
     unittest.main()
