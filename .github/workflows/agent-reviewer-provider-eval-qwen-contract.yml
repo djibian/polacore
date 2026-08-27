@@ -5,6 +5,7 @@ on:
     branches:
       - codex/experiment/65-qwen-reviewer-eval
       - codex/experiment/65-materialized-evidence-paths
+      - codex/experiment/65-tool-free-reviewer-bundle
   workflow_dispatch:
 
 permissions:
@@ -68,17 +69,12 @@ jobs:
             test -s "$out/reviewer-context.md"
             test -s "$out/candidate.py"
             grep -F "Exact candidate SHA: ${expected[$case]}" "$out/reviewer-context.md" >/dev/null
-            grep -F 'Read these allowlisted materialized evidence files:' "$out/reviewer-context.md" >/dev/null
-            grep -F 'agent-input/candidate.py' "$out/reviewer-context.md" >/dev/null
-            grep -F 'agent-input/candidate-tests.py' "$out/reviewer-context.md" >/dev/null
-            grep -F 'agent-input/candidate-provider.md' "$out/reviewer-context.md" >/dev/null
             ! grep -F 'c790315c92663aa7b15b9a626ae5d9fc07d3e378' "$out/reviewer-context.md"
             ! grep -F '9a653e50d1bec813ae738106cd65e0b2cde29dcb' "$out/reviewer-context.md"
             ! grep -F 'a821bcae50dadfd3f4d758056585162065d6ea30' "$out/reviewer-context.md"
           done
-          grep -F 'agent-input/candidate-diff.txt' scripts/reviewer_provider_eval.py >/dev/null
 
-      - name: Prove Qwen inference workflow is fixed-model exact-SHA and non-publishing
+      - name: Prove Qwen inference workflow is fixed-model exact-SHA tool-free and non-publishing
         shell: bash
         run: |
           set -euo pipefail
@@ -99,8 +95,14 @@ jobs:
           grep -F -- '--model albert/qwen3-coder-30b-A3b-instruct' "$workflow" >/dev/null
           grep -F 'QWEN_MODEL = "qwen3-coder-30b-A3b-instruct"' "$wrapper" >/dev/null
           grep -F 'model: albert/qwen3-coder-30b-A3b-instruct' "$agent" >/dev/null
+          grep -F '  read: deny' "$agent" >/dev/null
+          ! grep -Eq ': allow' "$agent"
+          grep -F '=== TRUSTED CONTROL BEGIN ===' "$workflow" >/dev/null
+          grep -F '=== TRUSTED CONTROL END ===' "$workflow" >/dev/null
+          grep -F '=== UNTRUSTED CANDIDATE EVIDENCE BEGIN:' "$workflow" >/dev/null
+          grep -F 'Do not use tools.' "$workflow" >/dev/null
           ! grep -Eq 'contents: write|pull-requests: write|issues: write|actions: write|checks: write|statuses: write|id-token: write' "$workflow"
-          ! grep -Eq 'edit: allow|bash: allow|webfetch: allow|websearch: allow|task: allow' "$agent"
+          ! grep -Eq 'edit: allow|bash: allow|read: allow|webfetch: allow|websearch: allow|task: allow' "$agent"
           ! grep -F 'c790315c92663aa7b15b9a626ae5d9fc07d3e378' "$agent"
           ! grep -F '9a653e50d1bec813ae738106cd65e0b2cde29dcb' "$agent"
           ! grep -F 'a821bcae50dadfd3f4d758056585162065d6ea30' "$agent"
@@ -109,7 +111,10 @@ jobs:
           text = Path('.github/workflows/agent-reviewer-provider-eval-qwen.yml').read_text()
           assert ('ref: $' + '{{ github.sha }}') in text
           assert 'scripts/agent_reviewer_validate.py' in text
-          assert 'MODEL_OUTPUT_INVALID' not in text  # status is emitted by unchanged scorer wrapper, not hardcoded by workflow
+          assert 'MODEL_OUTPUT_INVALID' not in text
+          assert 'cat agent-input/reviewer-context.md' in text
+          assert 'cat "agent-input/$evidence"' in text
+          assert 'cat agent-input/candidate-diff.txt' in text
           def step(name):
               marker = f'      - name: {name}\n'
               start = text.index(marker)
@@ -117,8 +122,10 @@ jobs:
               return text[start:] if end < 0 else text[start:end]
           collect = step('Materialize fresh PR 64 without Albert secret')
           infer = step('Evaluate fresh PR 64 after historical qualification')
+          historical = step('Evaluate blind historical corpus')
           assert 'GH_TOKEN:' in collect and 'ALBERT_API_KEY:' not in collect
           assert 'ALBERT_API_KEY:' in infer and 'GH_TOKEN:' not in infer
+          assert 'ALBERT_API_KEY:' in historical and 'GH_TOKEN:' not in historical
           PY
 
       - name: Report dry-contract identity
