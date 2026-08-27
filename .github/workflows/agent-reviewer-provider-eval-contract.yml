@@ -65,7 +65,7 @@ jobs:
             ! grep -F 'a821bcae50dadfd3f4d758056585162065d6ea30' "$out/reviewer-context.md"
           done
 
-      - name: Prove inference workflow remains non-publishing
+      - name: Prove inference workflow remains exact-SHA and non-publishing
         shell: bash
         run: |
           set -euo pipefail
@@ -76,12 +76,27 @@ jobs:
           grep -F 'contents: read' "$workflow" >/dev/null
           grep -F 'pull-requests: read' "$workflow" >/dev/null
           grep -F "test \"\$GITHUB_REF\" = 'refs/heads/engineering'" "$workflow" >/dev/null
+          grep -F 'ref: ${{ github.sha }}' "$workflow" >/dev/null
+          grep -F 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"' "$workflow" >/dev/null
           grep -F 'persist-credentials: false' "$workflow" >/dev/null
-          ! grep -Eq 'contents: write|pull-requests: write|issues: write|actions: write|checks: write|statuses: write' "$workflow"
+          ! grep -Eq 'contents: write|pull-requests: write|issues: write|actions: write|checks: write|statuses: write|id-token: write' "$workflow"
           ! grep -Eq 'edit: allow|bash: allow|webfetch: allow|websearch: allow|task: allow' "$agent"
           ! grep -F 'c790315c92663aa7b15b9a626ae5d9fc07d3e378' "$agent"
           ! grep -F '9a653e50d1bec813ae738106cd65e0b2cde29dcb' "$agent"
           ! grep -F 'a821bcae50dadfd3f4d758056585162065d6ea30' "$agent"
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/agent-reviewer-provider-eval.yml').read_text()
+          def step(name):
+              marker = f'      - name: {name}\n'
+              start = text.index(marker)
+              end = text.find('      - name:', start + len(marker))
+              return text[start:] if end < 0 else text[start:end]
+          collect = step('Materialize fresh PR 64 without Albert secret')
+          infer = step('Evaluate fresh PR 64 after historical qualification')
+          assert 'GH_TOKEN:' in collect and 'ALBERT_API_KEY:' not in collect
+          assert 'ALBERT_API_KEY:' in infer and 'GH_TOKEN:' not in infer
+          PY
 
       - name: Report dry-contract identity
         shell: bash
