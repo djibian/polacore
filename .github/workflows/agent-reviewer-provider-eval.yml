@@ -27,10 +27,10 @@ jobs:
           test "$GITHUB_REF" = 'refs/heads/engineering' || { echo 'evaluation must run from trusted engineering' >&2; exit 1; }
           test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER" || { echo 'initial experiment requires repository owner dispatch' >&2; exit 1; }
 
-      - name: Checkout trusted engineering with history
+      - name: Checkout exact trusted dispatch SHA with history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: engineering
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -50,7 +50,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git branch --show-current)" = engineering
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python3 -m py_compile scripts/reviewer_provider_eval.py scripts/agent_reviewer_validate.py tests/test_reviewer_provider_eval.py
           python3 -m unittest -v tests/test_reviewer_provider_eval.py
 
@@ -115,10 +115,9 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Evaluate fresh PR 64 only after historical qualification
+      - name: Materialize fresh PR 64 without Albert secret
         if: steps.summary.outputs.result == 'QUALIFIED_FOR_REPEAT'
         env:
-          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
@@ -128,6 +127,14 @@ jobs:
           rm -rf agent-input
           python3 scripts/reviewer_provider_eval.py materialize-fresh \
             --metadata /tmp/provider-eval/fresh-pr.json --diff /tmp/provider-eval/fresh.diff --out agent-input
+
+      - name: Evaluate fresh PR 64 after historical qualification
+        if: steps.summary.outputs.result == 'QUALIFIED_FOR_REPEAT'
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
           set +e
           opencode run --agent reviewer-provider-eval --model albert/deepseek-v4-flash --format json \
             'Review only the trusted control and fresh PR evidence. Return the exact Reviewer JSON contract.' \
