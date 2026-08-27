@@ -68,6 +68,8 @@ jobs:
           import reviewer_provider_eval_qwen as q
           assert q.QWEN_MODEL == 'qwen3-coder-30b-A3b-instruct'
           assert q.base.MODEL == q.QWEN_MODEL
+          assert q.BUNDLE_SCHEMA == 'polacore.reviewer-prompt-bundle/v1'
+          assert q.MAX_BUNDLE_BYTES == 150_000
           PY
 
       - name: Require Albert secret
@@ -102,12 +104,14 @@ jobs:
           for case in H1 H2 H3 H4; do
             rm -rf agent-input
             python3 scripts/reviewer_provider_eval_qwen.py materialize --case "$case" --out agent-input
+            python3 scripts/reviewer_provider_eval_qwen.py bundle --input agent-input --out "/tmp/provider-eval/${case}.prompt.json"
+            prompt="$(cat "/tmp/provider-eval/${case}.prompt.json")"
             set +e
             opencode run --agent reviewer-provider-eval-qwen --model albert/qwen3-coder-30b-A3b-instruct --format json \
-              'Review only the trusted control and materialized candidate evidence. Return the exact Reviewer JSON contract.' \
-              >"/tmp/provider-eval/${case}.jsonl" 2>"/tmp/provider-eval/${case}.stderr"
+              "$prompt" >"/tmp/provider-eval/${case}.jsonl" 2>"/tmp/provider-eval/${case}.stderr"
             status=$?
             set -e
+            unset prompt
             if [ "$status" -ne 0 ]; then
               python3 scripts/reviewer_provider_eval_qwen.py provider-failure --case "$case" --reason "model/provider invocation exited nonzero" \
                 --out "/tmp/provider-eval/results/${case}.json"
@@ -166,6 +170,7 @@ jobs:
           rm -rf agent-input
           python3 scripts/reviewer_provider_eval_qwen.py materialize-fresh \
             --metadata /tmp/provider-eval/fresh-pr.json --diff /tmp/provider-eval/fresh.diff --out agent-input
+          python3 scripts/reviewer_provider_eval_qwen.py bundle --input agent-input --out /tmp/provider-eval/F1.prompt.json
 
       - name: Evaluate fresh PR 64 after historical qualification
         if: steps.summary.outputs.result == 'QUALIFIED_FOR_REPEAT'
@@ -174,12 +179,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          prompt="$(cat /tmp/provider-eval/F1.prompt.json)"
           set +e
           opencode run --agent reviewer-provider-eval-qwen --model albert/qwen3-coder-30b-A3b-instruct --format json \
-            'Review only the trusted control and fresh PR evidence. Return the exact Reviewer JSON contract.' \
-            > /tmp/provider-eval/F1.jsonl 2>/tmp/provider-eval/F1.stderr
+            "$prompt" > /tmp/provider-eval/F1.jsonl 2>/tmp/provider-eval/F1.stderr
           status=$?
           set -e
+          unset prompt
           if [ "$status" -ne 0 ]; then
             python3 scripts/reviewer_provider_eval_qwen.py provider-failure --case F1 --reason "model/provider invocation exited nonzero" \
               --out /tmp/provider-eval/F1.invalid.json
