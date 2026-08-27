@@ -30,6 +30,7 @@ jobs:
 
           path = Path('.github/workflows/agent-reviewer-provider-catalog.yml')
           text = path.read_text(encoding='utf-8')
+          expression_prefix = '$' + '{{'
 
           required = [
               "github.event.issue.number == 65",
@@ -37,9 +38,10 @@ jobs:
               "github.event.comment.body == '/observe-albert-reviewer-models'",
               "github.actor == github.repository_owner",
               "test \"$GITHUB_REF\" = 'refs/heads/engineering'",
-              "ref: ${{ github.sha }}",
+              "ref: " + expression_prefix + " github.sha }}",
               "persist-credentials: false",
-              "ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}",
+              "ALBERT_API_KEY:",
+              "secrets.ALBERT_API_KEY",
               "https://albert.api.etalab.gouv.fr/v1/models",
               "authenticated_code_model_ids=",
               "authority=read-only-catalog-observation",
@@ -78,7 +80,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          printf 'lab_sha=%s\nobserver_sha256=%s\ncontract_sha256=%s\nsecret_used=false\nauthority=none\n' \
+          printf 'lab_sha=%s\nobserver_sha256=%s\ncontract_sha256=%s\nsecret_expression_resolved=false\nauthority=none\n' \
             "$(git rev-parse HEAD)" \
             "$(sha256sum .github/workflows/agent-reviewer-provider-catalog.yml | awk '{print $1}')" \
             "$(sha256sum .github/workflows/agent-reviewer-provider-catalog-contract.yml | awk '{print $1}')"
