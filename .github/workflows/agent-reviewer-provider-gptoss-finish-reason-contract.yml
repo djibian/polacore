@@ -98,7 +98,6 @@ jobs:
           assert 'message.get' not in source
           assert '["message"]' not in source
           assert "['message']" not in source
-          assert 'message.content' in source only if False else True
           PY
 
       - name: Prove no authority or trusted contract expansion
