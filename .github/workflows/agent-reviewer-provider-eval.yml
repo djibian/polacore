@@ -1,0 +1,171 @@
+name: PolaCore Reviewer Provider Evaluation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      OPENCODE_AUTO_SHARE: 'false'
+      OPENCODE_DISABLE_AUTOUPDATE: 'true'
+      OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true'
+      OPENCODE_DISABLE_LSP_DOWNLOAD: 'true'
+      OPENCODE_DISABLE_CLAUDE_CODE: 'true'
+    steps:
+      - name: Require trusted invocation boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/engineering' || { echo 'evaluation must run from trusted engineering' >&2; exit 1; }
+          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER" || { echo 'initial experiment requires repository owner dispatch' >&2; exit 1; }
+
+      - name: Checkout exact trusted dispatch SHA with history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch exact historical corpus commits without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for sha in \
+            86d66be36f4ea10a0a83b7fac1639951f1df72c1 \
+            884ef3c07c9c19f13d11bbbe1dbc3211f748b586 \
+            4236ed98f937b1e1fd9dcaefddffe711f0673a8f; do
+            git fetch --no-tags --no-recurse-submodules origin "$sha"
+            git cat-file -e "${sha}^{commit}"
+          done
+
+      - name: Verify runner identity and deterministic tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile scripts/reviewer_provider_eval.py scripts/agent_reviewer_validate.py tests/test_reviewer_provider_eval.py
+          python3 -m unittest -v tests/test_reviewer_provider_eval.py
+
+      - name: Require Albert secret
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: test -n "${ALBERT_API_KEY:-}" || { echo 'ALBERT_API_KEY is missing' >&2; exit 1; }
+
+      - name: Install pinned OpenCode
+        run: npm install --global opencode-ai@1.18.21
+
+      - name: Evaluate blind historical corpus
+        id: historical
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/provider-eval/results
+          provider_failed=false
+          for case in H1 H2 H3 H4; do
+            rm -rf agent-input
+            python3 scripts/reviewer_provider_eval.py materialize --case "$case" --out agent-input
+            set +e
+            opencode run --agent reviewer-provider-eval --model albert/deepseek-v4-flash --format json \
+              'Review only the trusted control and materialized candidate evidence. Return the exact Reviewer JSON contract.' \
+              >"/tmp/provider-eval/${case}.jsonl" 2>"/tmp/provider-eval/${case}.stderr"
+            status=$?
+            set -e
+            if [ "$status" -ne 0 ]; then
+              python3 scripts/reviewer_provider_eval.py provider-failure --case "$case" --reason "model/provider invocation exited nonzero" \
+                --out "/tmp/provider-eval/results/${case}.json"
+              provider_failed=true
+              break
+            fi
+            python3 scripts/agent_reviewer_validate.py "/tmp/provider-eval/${case}.jsonl" "/tmp/provider-eval/${case}.decision.json"
+            python3 scripts/reviewer_provider_eval.py score --case "$case" \
+              --decision "/tmp/provider-eval/${case}.decision.json" --out "/tmp/provider-eval/results/${case}.json"
+          done
+          if [ "$provider_failed" = true ]; then
+            echo 'provider_failed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'provider_failed=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Summarize historical result
+        id: summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(/tmp/provider-eval/results/*.json)
+          python3 scripts/reviewer_provider_eval.py summarize --inputs "${files[@]}" --out /tmp/provider-eval/summary.json
+          cat /tmp/provider-eval/summary.json
+          result="$(python3 -c "import json; print(json.load(open('/tmp/provider-eval/summary.json'))['result'])")"
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          {
+            echo '## Albert/DeepSeek Reviewer provider experiment'
+            echo
+            echo '```json'
+            cat /tmp/provider-eval/summary.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Materialize fresh PR 64 without Albert secret
+        if: steps.summary.outputs.result == 'QUALIFIED_FOR_REPEAT'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh pr view 64 --repo "$GITHUB_REPOSITORY" --json number,state,baseRefName,headRefOid > /tmp/provider-eval/fresh-pr.json
+          gh pr diff 64 --repo "$GITHUB_REPOSITORY" > /tmp/provider-eval/fresh.diff
+          rm -rf agent-input
+          python3 scripts/reviewer_provider_eval.py materialize-fresh \
+            --metadata /tmp/provider-eval/fresh-pr.json --diff /tmp/provider-eval/fresh.diff --out agent-input
+
+      - name: Evaluate fresh PR 64 after historical qualification
+        if: steps.summary.outputs.result == 'QUALIFIED_FOR_REPEAT'
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          opencode run --agent reviewer-provider-eval --model albert/deepseek-v4-flash --format json \
+            'Review only the trusted control and fresh PR evidence. Return the exact Reviewer JSON contract.' \
+            > /tmp/provider-eval/F1.jsonl 2>/tmp/provider-eval/F1.stderr
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo 'F1 provider/model invocation failed; fresh review remains UNPROVEN.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python3 scripts/agent_reviewer_validate.py /tmp/provider-eval/F1.jsonl /tmp/provider-eval/F1.decision.json
+          {
+            echo
+            echo '### Fresh PR #64 qualitative result'
+            echo '```json'
+            cat /tmp/provider-eval/F1.decision.json
+            echo '```'
+            echo
+            echo 'This inference does not authorize merge or provider migration.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Print reproducible evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_sha="$(git rev-parse HEAD)"
+          agent_sha="$(sha256sum .opencode/agents/reviewer-provider-eval.md | awk '{print $1}')"
+          workflow_sha="$(sha256sum .github/workflows/agent-reviewer-provider-eval.yml | awk '{print $1}')"
+          printf 'trusted_runner_sha=%s\nreviewer_agent_sha256=%s\nworkflow_sha256=%s\nprovider=albert\nmodel=deepseek-v4-flash\n' \
+            "$runner_sha" "$agent_sha" "$workflow_sha"
+          for f in /tmp/provider-eval/results/*.json /tmp/provider-eval/summary.json /tmp/provider-eval/F1.decision.json; do
+            if [ -f "$f" ]; then echo "--- $f"; cat "$f"; fi
+          done
