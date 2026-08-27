@@ -96,7 +96,19 @@ jobs:
               provider_failed=true
               break
             fi
-            python3 scripts/agent_reviewer_validate.py "/tmp/provider-eval/${case}.jsonl" "/tmp/provider-eval/${case}.decision.json"
+
+            set +e
+            python3 scripts/agent_reviewer_validate.py "/tmp/provider-eval/${case}.jsonl" "/tmp/provider-eval/${case}.decision.json" \
+              >"/tmp/provider-eval/${case}.validator.stdout" 2>"/tmp/provider-eval/${case}.validator.stderr"
+            validation_status=$?
+            set -e
+            if [ "$validation_status" -ne 0 ]; then
+              reason="$(tr '\n' ' ' <"/tmp/provider-eval/${case}.validator.stderr" | cut -c1-400)"
+              python3 scripts/reviewer_provider_eval.py model-output-invalid --case "$case" --reason "$reason" \
+                --out "/tmp/provider-eval/results/${case}.json"
+              continue
+            fi
+
             python3 scripts/reviewer_provider_eval.py score --case "$case" \
               --decision "/tmp/provider-eval/${case}.decision.json" --out "/tmp/provider-eval/results/${case}.json"
           done
@@ -151,10 +163,25 @@ jobs:
           status=$?
           set -e
           if [ "$status" -ne 0 ]; then
+            python3 scripts/reviewer_provider_eval.py provider-failure --case F1 --reason "model/provider invocation exited nonzero" \
+              --out /tmp/provider-eval/F1.invalid.json
             echo 'F1 provider/model invocation failed; fresh review remains UNPROVEN.' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          python3 scripts/agent_reviewer_validate.py /tmp/provider-eval/F1.jsonl /tmp/provider-eval/F1.decision.json
+
+          set +e
+          python3 scripts/agent_reviewer_validate.py /tmp/provider-eval/F1.jsonl /tmp/provider-eval/F1.decision.json \
+            >/tmp/provider-eval/F1.validator.stdout 2>/tmp/provider-eval/F1.validator.stderr
+          validation_status=$?
+          set -e
+          if [ "$validation_status" -ne 0 ]; then
+            reason="$(tr '\n' ' ' </tmp/provider-eval/F1.validator.stderr | cut -c1-400)"
+            python3 scripts/reviewer_provider_eval.py model-output-invalid --case F1 --reason "$reason" \
+              --out /tmp/provider-eval/F1.invalid.json
+            echo 'F1 model output failed deterministic validation; fresh review remains UNPROVEN.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           {
             echo
             echo '### Fresh PR #64 qualitative result'
@@ -175,6 +202,6 @@ jobs:
           workflow_sha="$(sha256sum .github/workflows/agent-reviewer-provider-eval.yml | awk '{print $1}')"
           printf 'trusted_runner_sha=%s\nreviewer_agent_sha256=%s\nworkflow_sha256=%s\nprovider=albert\nmodel=deepseek-v4-flash\n' \
             "$runner_sha" "$agent_sha" "$workflow_sha"
-          for f in /tmp/provider-eval/results/*.json /tmp/provider-eval/summary.json /tmp/provider-eval/F1.decision.json; do
+          for f in /tmp/provider-eval/results/*.json /tmp/provider-eval/summary.json /tmp/provider-eval/F1.decision.json /tmp/provider-eval/F1.invalid.json; do
             if [ -f "$f" ]; then echo "--- $f"; cat "$f"; fi
           done
