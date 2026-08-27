@@ -6,6 +6,7 @@ on:
       - codex/experiment/65-albert-reviewer-eval
       - codex/experiment/65-reviewer-eval-control-trigger
       - codex/experiment/65-eval-output-contract-repair
+      - codex/experiment/65-materialized-evidence-paths
   workflow_dispatch:
 
 permissions:
@@ -62,10 +63,15 @@ jobs:
             test -s "$out/reviewer-context.md"
             test -s "$out/candidate.py"
             grep -F "Exact candidate SHA: ${expected[$case]}" "$out/reviewer-context.md" >/dev/null
+            grep -F 'Read these allowlisted materialized evidence files:' "$out/reviewer-context.md" >/dev/null
+            grep -F 'agent-input/candidate.py' "$out/reviewer-context.md" >/dev/null
+            grep -F 'agent-input/candidate-tests.py' "$out/reviewer-context.md" >/dev/null
+            grep -F 'agent-input/candidate-provider.md' "$out/reviewer-context.md" >/dev/null
             ! grep -F 'c790315c92663aa7b15b9a626ae5d9fc07d3e378' "$out/reviewer-context.md"
             ! grep -F '9a653e50d1bec813ae738106cd65e0b2cde29dcb' "$out/reviewer-context.md"
             ! grep -F 'a821bcae50dadfd3f4d758056585162065d6ea30' "$out/reviewer-context.md"
           done
+          grep -F 'agent-input/candidate-diff.txt' scripts/reviewer_provider_eval.py >/dev/null
 
       - name: Prove inference workflow remains exact-SHA and non-publishing
         shell: bash
