@@ -1,0 +1,121 @@
+name: PolaCore GPT-OSS Structured Response Diagnostic Contract
+
+on:
+  push:
+    branches:
+      - codex/experiment/65-gptoss-extract-diagnostics
+
+permissions:
+  contents: read
+
+jobs:
+  dry-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Lab SHA without persistent credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove diagnostic-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/agent-reviewer-provider-gptoss-response-diagnostic.yml')
+          text = path.read_text(encoding='utf-8')
+          expression_prefix = '$' + '{{'
+
+          required = [
+              "github.event.issue.number == 65",
+              "github.event.issue.pull_request == null",
+              "github.event.comment.body == '/diagnose-albert-gptoss-structured'",
+              "github.actor == github.repository_owner",
+              "test \"$GITHUB_REF\" = 'refs/heads/engineering'",
+              "ref: " + expression_prefix + " github.sha }}",
+              "persist-credentials: false",
+              "contents: read",
+              "secrets.ALBERT_API_KEY",
+              "86d66be36f4ea10a0a83b7fac1639951f1df72c1",
+              "scripts/reviewer_provider_eval_gptoss.py materialize --case H1",
+              "scripts/reviewer_provider_structured_transport_gptoss.py build-request",
+              "scripts/reviewer_provider_structured_transport_gptoss.py extract-response",
+              "https://albert.api.etalab.gouv.fr/v1/chat/completions",
+              "response_envelope=",
+              "content_type",
+              "content_len",
+              "content_has_surrogate",
+              "extract_exception_tail=",
+              "authority=diagnostic-only",
+          ]
+          for needle in required:
+              assert needle in text, needle
+
+          forbidden = [
+              'pull_request_target:',
+              'contents: write',
+              'pull-requests: write',
+              'issues: write',
+              'actions: write',
+              'checks: write',
+              'statuses: write',
+              'deployments: write',
+              'packages: write',
+              'id-token: write',
+              'gh pr ',
+              'gh issue ',
+              'gh api ',
+              'git push',
+              'cat /tmp/provider-eval-H1.response.json',
+              "print(content)",
+              "print(payload)",
+              "print(message)",
+              "materialize --case H2",
+              "materialize --case H3",
+              "materialize --case H4",
+              'reviewer_provider_eval_gptoss.py score',
+              'reviewer_provider_eval_gptoss.py summarize',
+              'agent_reviewer_validate.py /tmp/provider-eval-H1',
+          ]
+          for needle in forbidden:
+              assert needle not in text, needle
+
+          assert text.count('https://albert.api.etalab.gouv.fr/v1/chat/completions') == 1
+          assert text.count('scripts/reviewer_provider_eval_gptoss.py materialize --case H1') == 1
+          assert 'response_envelope=' in text and "json.dumps(result" in text
+          assert "'content':" not in text
+          PY
+
+      - name: Prove trusted transport remains unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/reviewer_provider_eval.py \
+            scripts/reviewer_provider_eval_gptoss.py \
+            scripts/reviewer_provider_structured_transport.py \
+            scripts/reviewer_provider_structured_transport_gptoss.py \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_structured_transport.py
+          python3 -m unittest -v \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_structured_transport.py
+
+      - name: Report dry-contract identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'lab_sha=%s\nbase_transport_sha256=%s\nbinding_sha256=%s\ndiagnostic_sha256=%s\ncontract_sha256=%s\nsecret_expression_resolved=false\nauthority=none\n' \
+            "$(git rev-parse HEAD)" \
+            "$(sha256sum scripts/reviewer_provider_structured_transport.py | awk '{print $1}')" \
+            "$(sha256sum scripts/reviewer_provider_structured_transport_gptoss.py | awk '{print $1}')" \
+            "$(sha256sum .github/workflows/agent-reviewer-provider-gptoss-response-diagnostic.yml | awk '{print $1}')" \
+            "$(sha256sum .github/workflows/agent-reviewer-provider-gptoss-response-diagnostic-contract.yml | awk '{print $1}')"
