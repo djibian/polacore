@@ -1,0 +1,86 @@
+name: PolaCore Albert Reviewer Model Catalog Contract
+
+on:
+  push:
+    branches:
+      - codex/experiment/65-albert-model-catalog
+
+permissions:
+  contents: read
+
+jobs:
+  dry-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact Lab SHA without persistent credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove catalog observer is read-only and non-inferencing
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/agent-reviewer-provider-catalog.yml')
+          text = path.read_text(encoding='utf-8')
+          expression_prefix = '$' + '{{'
+
+          required = [
+              "github.event.issue.number == 65",
+              "github.event.issue.pull_request == null",
+              "github.event.comment.body == '/observe-albert-reviewer-models'",
+              "github.actor == github.repository_owner",
+              "test \"$GITHUB_REF\" = 'refs/heads/engineering'",
+              "ref: " + expression_prefix + " github.sha }}",
+              "persist-credentials: false",
+              "ALBERT_API_KEY:",
+              "secrets.ALBERT_API_KEY",
+              "https://albert.api.etalab.gouv.fr/v1/models",
+              "authenticated_code_model_ids=",
+              "authority=read-only-catalog-observation",
+              "permissions:\n  contents: read",
+          ]
+          for needle in required:
+              assert needle in text, needle
+
+          forbidden = [
+              '/v1/chat/completions',
+              'pull_request_target:',
+              'contents: write',
+              'pull-requests: write',
+              'issues: write',
+              'actions: write',
+              'checks: write',
+              'statuses: write',
+              'deployments: write',
+              'packages: write',
+              'id-token: write',
+              'gh pr ',
+              'gh issue ',
+              'gh api ',
+              'git push',
+              'curl -X POST',
+              'curl --request POST',
+          ]
+          for needle in forbidden:
+              assert needle not in text, needle
+
+          assert text.count('https://albert.api.etalab.gouv.fr/v1/models') == 1
+          assert text.count('uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1') == 1
+          PY
+
+      - name: Report dry-contract identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'lab_sha=%s\nobserver_sha256=%s\ncontract_sha256=%s\nsecret_expression_resolved=false\nauthority=none\n' \
+            "$(git rev-parse HEAD)" \
+            "$(sha256sum .github/workflows/agent-reviewer-provider-catalog.yml | awk '{print $1}')" \
+            "$(sha256sum .github/workflows/agent-reviewer-provider-catalog-contract.yml | awk '{print $1}')"
