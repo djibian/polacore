@@ -1,0 +1,296 @@
+name: PolaCore DeepSeek Structured Reviewer Evaluation
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 65 &&
+       github.event.issue.pull_request == null &&
+       github.event.comment.body == '/run-albert-reviewer-eval-deepseek-structured' &&
+       github.actor == github.repository_owner)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Require trusted invocation boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/engineering' || { echo 'evaluation must run from trusted engineering' >&2; exit 1; }
+          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER" || { echo 'initial experiment requires repository owner invocation' >&2; exit 1; }
+
+      - name: Checkout exact trusted invocation SHA with history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch exact historical corpus commits without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for sha in \
+            86d66be36f4ea10a0a83b7fac1639951f1df72c1 \
+            884ef3c07c9c19f13d11bbbe1dbc3211f748b586 \
+            4236ed98f937b1e1fd9dcaefddffe711f0673a8f; do
+            git fetch --no-tags --no-recurse-submodules origin "$sha"
+            git cat-file -e "${sha}^{commit}"
+          done
+
+      - name: Verify runner identity and deterministic tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile \
+            scripts/reviewer_provider_eval.py \
+            scripts/reviewer_provider_structured_transport.py \
+            scripts/reviewer_provider_structured_transport_deepseek.py \
+            scripts/agent_reviewer_validate.py \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_structured_transport.py
+          python3 -m unittest -v \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_structured_transport.py
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0, 'scripts')
+          import reviewer_provider_eval as e
+          import reviewer_provider_structured_transport_deepseek as t
+          assert e.MODEL == 'deepseek-v4-flash'
+          assert t.DEEPSEEK_MODEL == e.MODEL
+          assert t.base.MODEL == t.DEEPSEEK_MODEL
+          PY
+
+      - name: Require Albert secret
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: test -n "${ALBERT_API_KEY:-}" || { echo 'ALBERT_API_KEY is missing' >&2; exit 1; }
+
+      - name: Verify DeepSeek is authorized by current Albert catalogue
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${ALBERT_API_KEY}" \
+            https://albert.api.etalab.gouv.fr/v1/models \
+            | python3 -c 'import json,sys; ids={str(x.get("id")) for x in json.load(sys.stdin).get("data",[]) if x.get("id")}; assert "deepseek-v4-flash" in ids'
+
+      - name: Evaluate blind historical corpus with Structured Outputs
+        id: historical
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/provider-eval/results
+          provider_failed=false
+          for case in H1 H2 H3 H4; do
+            rm -rf agent-input
+            python3 scripts/reviewer_provider_eval.py materialize --case "$case" --out agent-input
+            bundle="/tmp/provider-eval/${case}.prompt.txt"
+            {
+              printf '%s\n' '=== TRUSTED CONTROL BEGIN ==='
+              cat agent-input/reviewer-context.md
+              printf '%s\n' '=== TRUSTED CONTROL END ==='
+              for evidence in candidate.py candidate-tests.py candidate-provider.md; do
+                if [ -s "agent-input/$evidence" ]; then
+                  printf '%s\n' "=== UNTRUSTED CANDIDATE EVIDENCE BEGIN: $evidence ==="
+                  cat "agent-input/$evidence"
+                  printf '%s\n' "=== UNTRUSTED CANDIDATE EVIDENCE END: $evidence ==="
+                fi
+              done
+              printf '%s\n' 'Review only the bounded bundle above. Do not use tools. Return the exact Reviewer JSON contract.'
+            } > "$bundle"
+
+            request="/tmp/provider-eval/${case}.request.json"
+            response="/tmp/provider-eval/${case}.response.json"
+            jsonl="/tmp/provider-eval/${case}.jsonl"
+            python3 scripts/reviewer_provider_structured_transport_deepseek.py build-request \
+              --bundle "$bundle" \
+              --agent .opencode/agents/reviewer-provider-eval.md \
+              --out "$request"
+
+            set +e
+            curl --fail-with-body --silent --show-error --connect-timeout 15 --max-time 120 \
+              -H "Authorization: Bearer ${ALBERT_API_KEY}" \
+              -H 'Content-Type: application/json' \
+              --data-binary "@$request" \
+              https://albert.api.etalab.gouv.fr/v1/chat/completions \
+              >"$response" 2>"/tmp/provider-eval/${case}.curl.stderr"
+            status=$?
+            set -e
+            if [ "$status" -ne 0 ]; then
+              python3 scripts/reviewer_provider_eval.py provider-failure --case "$case" \
+                --reason "structured chat-completion request exited nonzero" \
+                --out "/tmp/provider-eval/results/${case}.json"
+              provider_failed=true
+              break
+            fi
+
+            set +e
+            python3 scripts/reviewer_provider_structured_transport_deepseek.py extract-response \
+              --response "$response" --out "$jsonl" \
+              >/tmp/provider-eval/${case}.extract.stdout 2>/tmp/provider-eval/${case}.extract.stderr
+            extract_status=$?
+            set -e
+            if [ "$extract_status" -ne 0 ]; then
+              reason="$(tr '\n' ' ' </tmp/provider-eval/${case}.extract.stderr | cut -c1-300)"
+              python3 scripts/reviewer_provider_eval.py provider-failure --case "$case" \
+                --reason "structured provider response rejected: ${reason}" \
+                --out "/tmp/provider-eval/results/${case}.json"
+              provider_failed=true
+              break
+            fi
+
+            set +e
+            python3 scripts/agent_reviewer_validate.py "$jsonl" "/tmp/provider-eval/${case}.decision.json" \
+              >/tmp/provider-eval/${case}.validator.stdout 2>/tmp/provider-eval/${case}.validator.stderr
+            validation_status=$?
+            set -e
+            if [ "$validation_status" -ne 0 ]; then
+              reason="$(tr '\n' ' ' </tmp/provider-eval/${case}.validator.stderr | cut -c1-400)"
+              python3 scripts/reviewer_provider_eval.py model-output-invalid --case "$case" --reason "$reason" \
+                --out "/tmp/provider-eval/results/${case}.json"
+              continue
+            fi
+            python3 scripts/reviewer_provider_eval.py score --case "$case" \
+              --decision "/tmp/provider-eval/${case}.decision.json" --out "/tmp/provider-eval/results/${case}.json"
+          done
+          echo "provider_failed=$provider_failed" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize historical result
+        id: summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(/tmp/provider-eval/results/*.json)
+          python3 scripts/reviewer_provider_eval.py summarize --inputs "${files[@]}" --out /tmp/provider-eval/summary.json
+          cat /tmp/provider-eval/summary.json
+          result="$(python3 -c "import json; print(json.load(open('/tmp/provider-eval/summary.json'))['result'])")"
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          {
+            echo '## Albert/DeepSeek Structured Reviewer experiment'
+            echo
+            echo '```json'
+            cat /tmp/provider-eval/summary.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Materialize fresh PR 64 without Albert secret
+        if: steps.summary.outputs.result == 'QUALIFIED_FOR_REPEAT'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh pr view 64 --repo "$GITHUB_REPOSITORY" --json number,state,baseRefName,headRefOid > /tmp/provider-eval/fresh-pr.json
+          gh pr diff 64 --repo "$GITHUB_REPOSITORY" > /tmp/provider-eval/fresh.diff
+          rm -rf agent-input
+          python3 scripts/reviewer_provider_eval.py materialize-fresh \
+            --metadata /tmp/provider-eval/fresh-pr.json --diff /tmp/provider-eval/fresh.diff --out agent-input
+
+      - name: Evaluate fresh PR 64 with Structured Outputs
+        if: steps.summary.outputs.result == 'QUALIFIED_FOR_REPEAT'
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle=/tmp/provider-eval/F1.prompt.txt
+          {
+            printf '%s\n' '=== TRUSTED CONTROL BEGIN ==='
+            cat agent-input/reviewer-context.md
+            printf '%s\n' '=== TRUSTED CONTROL END ==='
+            printf '%s\n' '=== UNTRUSTED CANDIDATE EVIDENCE BEGIN: candidate-diff.txt ==='
+            cat agent-input/candidate-diff.txt
+            printf '%s\n' '=== UNTRUSTED CANDIDATE EVIDENCE END: candidate-diff.txt ==='
+            printf '%s\n' 'Review only the bounded bundle above. Do not use tools. Return the exact Reviewer JSON contract.'
+          } > "$bundle"
+          python3 scripts/reviewer_provider_structured_transport_deepseek.py build-request \
+            --bundle "$bundle" \
+            --agent .opencode/agents/reviewer-provider-eval.md \
+            --out /tmp/provider-eval/F1.request.json
+
+          set +e
+          curl --fail-with-body --silent --show-error --connect-timeout 15 --max-time 120 \
+            -H "Authorization: Bearer ${ALBERT_API_KEY}" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/provider-eval/F1.request.json \
+            https://albert.api.etalab.gouv.fr/v1/chat/completions \
+            >/tmp/provider-eval/F1.response.json 2>/tmp/provider-eval/F1.curl.stderr
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            python3 scripts/reviewer_provider_eval.py provider-failure --case F1 \
+              --reason "structured chat-completion request exited nonzero" --out /tmp/provider-eval/F1.invalid.json
+            echo 'F1 structured provider request failed; fresh review remains UNPROVEN.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          set +e
+          python3 scripts/reviewer_provider_structured_transport_deepseek.py extract-response \
+            --response /tmp/provider-eval/F1.response.json --out /tmp/provider-eval/F1.jsonl \
+            >/tmp/provider-eval/F1.extract.stdout 2>/tmp/provider-eval/F1.extract.stderr
+          extract_status=$?
+          set -e
+          if [ "$extract_status" -ne 0 ]; then
+            reason="$(tr '\n' ' ' </tmp/provider-eval/F1.extract.stderr | cut -c1-300)"
+            python3 scripts/reviewer_provider_eval.py provider-failure --case F1 \
+              --reason "structured provider response rejected: ${reason}" --out /tmp/provider-eval/F1.invalid.json
+            echo 'F1 structured provider response was rejected; fresh review remains UNPROVEN.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          set +e
+          python3 scripts/agent_reviewer_validate.py /tmp/provider-eval/F1.jsonl /tmp/provider-eval/F1.decision.json \
+            >/tmp/provider-eval/F1.validator.stdout 2>/tmp/provider-eval/F1.validator.stderr
+          validation_status=$?
+          set -e
+          if [ "$validation_status" -ne 0 ]; then
+            reason="$(tr '\n' ' ' </tmp/provider-eval/F1.validator.stderr | cut -c1-400)"
+            python3 scripts/reviewer_provider_eval.py model-output-invalid --case F1 --reason "$reason" \
+              --out /tmp/provider-eval/F1.invalid.json
+            echo 'F1 model output failed deterministic validation; fresh review remains UNPROVEN.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo
+            echo '### Fresh PR #64 qualitative result'
+            echo '```json'
+            cat /tmp/provider-eval/F1.decision.json
+            echo '```'
+            echo
+            echo 'This inference does not authorize merge or provider migration.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Print reproducible evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_sha="$(git rev-parse HEAD)"
+          base_transport_sha="$(sha256sum scripts/reviewer_provider_structured_transport.py | awk '{print $1}')"
+          binding_sha="$(sha256sum scripts/reviewer_provider_structured_transport_deepseek.py | awk '{print $1}')"
+          agent_sha="$(sha256sum .opencode/agents/reviewer-provider-eval.md | awk '{print $1}')"
+          workflow_sha="$(sha256sum .github/workflows/agent-reviewer-provider-eval-deepseek-structured.yml | awk '{print $1}')"
+          printf 'trusted_runner_sha=%s\nbase_transport_sha256=%s\ntransport_binding_sha256=%s\nreviewer_agent_sha256=%s\nworkflow_sha256=%s\nprovider=albert\nmodel=deepseek-v4-flash\ntransport=json_schema\n' \
+            "$runner_sha" "$base_transport_sha" "$binding_sha" "$agent_sha" "$workflow_sha"
+          for f in /tmp/provider-eval/results/*.json /tmp/provider-eval/summary.json /tmp/provider-eval/F1.decision.json /tmp/provider-eval/F1.invalid.json; do
+            if [ -f "$f" ]; then echo "--- $f"; cat "$f"; fi
+          done
