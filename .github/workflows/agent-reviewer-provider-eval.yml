@@ -2,12 +2,21 @@ name: PolaCore Reviewer Provider Evaluation
 
 on:
   workflow_dispatch:
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
 
 jobs:
   evaluate:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 65 &&
+       github.event.issue.pull_request == null &&
+       github.event.comment.body == '/run-albert-reviewer-eval' &&
+       github.actor == github.repository_owner)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -25,9 +34,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = 'refs/heads/engineering' || { echo 'evaluation must run from trusted engineering' >&2; exit 1; }
-          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER" || { echo 'initial experiment requires repository owner dispatch' >&2; exit 1; }
+          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER" || { echo 'initial experiment requires repository owner invocation' >&2; exit 1; }
 
-      - name: Checkout exact trusted dispatch SHA with history
+      - name: Checkout exact trusted invocation SHA with history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
