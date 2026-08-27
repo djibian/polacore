@@ -34,6 +34,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Fetch exact historical corpus commits without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for sha in \
+            86d66be36f4ea10a0a83b7fac1639951f1df72c1 \
+            884ef3c07c9c19f13d11bbbe1dbc3211f748b586 \
+            4236ed98f937b1e1fd9dcaefddffe711f0673a8f; do
+            git fetch --no-tags --no-recurse-submodules origin "$sha"
+            git cat-file -e "${sha}^{commit}"
+          done
+
       - name: Verify runner identity and deterministic tests
         shell: bash
         run: |
