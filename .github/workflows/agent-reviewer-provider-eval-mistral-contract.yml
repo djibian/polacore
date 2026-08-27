@@ -5,6 +5,7 @@ on:
     branches:
       - codex/experiment/65-mistral-reviewer-eval
       - codex/experiment/65-mistral-provider-observability
+      - codex/experiment/65-mistral-explicit-json-no-fences
   workflow_dispatch:
 
 permissions:
@@ -100,6 +101,8 @@ jobs:
           grep -F -- '--model albert/mistral-small-3-2-24b-instruct-2506' "$workflow" >/dev/null
           grep -F 'MISTRAL_MODEL = "mistral-small-3-2-24b-instruct-2506"' "$wrapper" >/dev/null
           grep -F 'model: albert/mistral-small-3-2-24b-instruct-2506' "$agent" >/dev/null
+          grep -F 'exactly one JSON object and nothing else' "$agent" >/dev/null
+          grep -F 'Do not use Markdown, code fences, backticks, prose before the JSON, or prose after the JSON.' "$agent" >/dev/null
           grep -F '  read: deny' "$agent" >/dev/null
           ! grep -Eq ': allow' "$agent"
           grep -F '=== TRUSTED CONTROL BEGIN ===' "$workflow" >/dev/null
