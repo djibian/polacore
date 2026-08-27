@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - codex/experiment/65-mistral-reviewer-eval
+      - codex/experiment/65-mistral-provider-observability
   workflow_dispatch:
 
 permissions:
@@ -43,11 +44,17 @@ jobs:
           python3 -m py_compile scripts/reviewer_provider_eval.py scripts/reviewer_provider_eval_mistral.py scripts/agent_reviewer_validate.py tests/test_reviewer_provider_eval.py
           python3 -m unittest -v tests/test_reviewer_provider_eval.py
           python3 - <<'PY'
-          import sys
+          import json, sys
+          from pathlib import Path
           sys.path.insert(0, 'scripts')
           import reviewer_provider_eval_mistral as m
           assert m.MISTRAL_MODEL == 'mistral-small-3-2-24b-instruct-2506'
           assert m.base.MODEL == m.MISTRAL_MODEL
+          config = json.loads(Path('opencode.json').read_text())
+          albert = config['provider']['albert']
+          assert albert['options']['baseURL'] == 'https://albert.api.etalab.gouv.fr/v1'
+          assert albert['options']['apiKey'] == '{env:ALBERT_API_KEY}'
+          assert m.MISTRAL_MODEL in albert['models']
           PY
 
       - name: Materialize identical blind historical candidates
@@ -131,6 +138,7 @@ jobs:
           set -euo pipefail
           echo "lab_sha=$(git rev-parse HEAD)"
           sha256sum \
+            opencode.json \
             scripts/reviewer_provider_eval.py \
             scripts/reviewer_provider_eval_mistral.py \
             scripts/agent_reviewer_validate.py \
