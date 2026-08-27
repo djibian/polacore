@@ -1,0 +1,140 @@
+name: PolaCore GPT-OSS Reviewer Provider Evaluation Contract
+
+on:
+  push:
+    branches:
+      - codex/experiment/65-gptoss-reviewer-eval
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Lab SHA with history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch exact historical corpus commits without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for sha in \
+            86d66be36f4ea10a0a83b7fac1639951f1df72c1 \
+            884ef3c07c9c19f13d11bbbe1dbc3211f748b586 \
+            4236ed98f937b1e1fd9dcaefddffe711f0673a8f; do
+            git fetch --no-tags --no-recurse-submodules origin "$sha"
+            git cat-file -e "${sha}^{commit}"
+          done
+
+      - name: Compile and run unchanged deterministic scorer tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile scripts/reviewer_provider_eval.py scripts/reviewer_provider_eval_gptoss.py scripts/agent_reviewer_validate.py tests/test_reviewer_provider_eval.py
+          python3 -m unittest -v tests/test_reviewer_provider_eval.py
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0, 'scripts')
+          import reviewer_provider_eval_gptoss as g
+          assert g.GPTOSS_MODEL == 'openai/gpt-oss-120b'
+          assert g.base.MODEL == g.GPTOSS_MODEL
+          PY
+
+      - name: Materialize identical blind historical candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A expected=(
+            [H1]='86d66be36f4ea10a0a83b7fac1639951f1df72c1'
+            [H2]='884ef3c07c9c19f13d11bbbe1dbc3211f748b586'
+            [H3]='4236ed98f937b1e1fd9dcaefddffe711f0673a8f'
+            [H4]='7fce52d8b8fd7e3a26e79d9609847f63a8fc38ce'
+          )
+          for case in H1 H2 H3 H4; do
+            out="/tmp/provider-eval-${case}"
+            rm -rf "$out"
+            python3 scripts/reviewer_provider_eval_gptoss.py materialize --case "$case" --out "$out"
+            test -s "$out/reviewer-context.md"
+            test -s "$out/candidate.py"
+            grep -F "Exact candidate SHA: ${expected[$case]}" "$out/reviewer-context.md" >/dev/null
+            ! grep -F 'c790315c92663aa7b15b9a626ae5d9fc07d3e378' "$out/reviewer-context.md"
+            ! grep -F '9a653e50d1bec813ae738106cd65e0b2cde29dcb' "$out/reviewer-context.md"
+            ! grep -F 'a821bcae50dadfd3f4d758056585162065d6ea30' "$out/reviewer-context.md"
+          done
+
+      - name: Prove GPT-OSS inference workflow is fixed-model exact-SHA tool-free and non-publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow='.github/workflows/agent-reviewer-provider-eval-gptoss.yml'
+          agent='.opencode/agents/reviewer-provider-eval-gptoss.md'
+          wrapper='scripts/reviewer_provider_eval_gptoss.py'
+          grep -F 'workflow_dispatch:' "$workflow" >/dev/null
+          grep -F 'issue_comment:' "$workflow" >/dev/null
+          grep -F 'types: [created]' "$workflow" >/dev/null
+          ! grep -Eq '^  (push|pull_request|issues|schedule):' "$workflow"
+          grep -F 'contents: read' "$workflow" >/dev/null
+          grep -F 'pull-requests: read' "$workflow" >/dev/null
+          grep -F "test \"\$GITHUB_REF\" = 'refs/heads/engineering'" "$workflow" >/dev/null
+          grep -F 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"' "$workflow" >/dev/null
+          grep -F 'persist-credentials: false' "$workflow" >/dev/null
+          grep -F "github.event.comment.body == '/run-albert-reviewer-eval-gptoss'" "$workflow" >/dev/null
+          grep -F 'github.actor == github.repository_owner' "$workflow" >/dev/null
+          grep -F -- '--model albert/openai/gpt-oss-120b' "$workflow" >/dev/null
+          grep -F 'GPTOSS_MODEL = "openai/gpt-oss-120b"' "$wrapper" >/dev/null
+          grep -F 'model: albert/openai/gpt-oss-120b' "$agent" >/dev/null
+          grep -F '  read: deny' "$agent" >/dev/null
+          ! grep -Eq ': allow' "$agent"
+          grep -F '=== TRUSTED CONTROL BEGIN ===' "$workflow" >/dev/null
+          grep -F '=== TRUSTED CONTROL END ===' "$workflow" >/dev/null
+          grep -F '=== UNTRUSTED CANDIDATE EVIDENCE BEGIN:' "$workflow" >/dev/null
+          grep -F 'Do not use tools.' "$workflow" >/dev/null
+          ! grep -Eq 'contents: write|pull-requests: write|issues: write|actions: write|checks: write|statuses: write|id-token: write' "$workflow"
+          ! grep -Eq 'edit: allow|bash: allow|read: allow|webfetch: allow|websearch: allow|task: allow' "$agent"
+          ! grep -F 'c790315c92663aa7b15b9a626ae5d9fc07d3e378' "$agent"
+          ! grep -F '9a653e50d1bec813ae738106cd65e0b2cde29dcb' "$agent"
+          ! grep -F 'a821bcae50dadfd3f4d758056585162065d6ea30' "$agent"
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/agent-reviewer-provider-eval-gptoss.yml').read_text()
+          assert ('ref: $' + '{{ github.sha }}') in text
+          assert 'scripts/agent_reviewer_validate.py' in text
+          assert 'cat agent-input/reviewer-context.md' in text
+          assert 'cat "agent-input/$evidence"' in text
+          assert 'cat agent-input/candidate-diff.txt' in text
+          def step(name):
+              marker = f'      - name: {name}\n'
+              start = text.index(marker)
+              end = text.find('      - name:', start + len(marker))
+              return text[start:] if end < 0 else text[start:end]
+          collect = step('Materialize fresh PR 64 without Albert secret')
+          infer = step('Evaluate fresh PR 64 after historical qualification')
+          historical = step('Evaluate blind historical corpus')
+          assert 'GH_TOKEN:' in collect and 'ALBERT_API_KEY:' not in collect
+          assert 'ALBERT_API_KEY:' in infer and 'GH_TOKEN:' not in infer
+          assert 'ALBERT_API_KEY:' in historical and 'GH_TOKEN:' not in historical
+          PY
+
+      - name: Report dry-contract identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "lab_sha=$(git rev-parse HEAD)"
+          sha256sum \
+            scripts/reviewer_provider_eval.py \
+            scripts/reviewer_provider_eval_gptoss.py \
+            scripts/agent_reviewer_validate.py \
+            tests/test_reviewer_provider_eval.py \
+            .opencode/agents/reviewer-provider-eval-gptoss.md \
+            .github/workflows/agent-reviewer-provider-eval-gptoss.yml \
+            .github/workflows/agent-reviewer-provider-eval-gptoss-contract.yml
