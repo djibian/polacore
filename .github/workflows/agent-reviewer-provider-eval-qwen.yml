@@ -102,10 +102,23 @@ jobs:
           for case in H1 H2 H3 H4; do
             rm -rf agent-input
             python3 scripts/reviewer_provider_eval_qwen.py materialize --case "$case" --out agent-input
+            bundle="/tmp/provider-eval/${case}.prompt.txt"
+            {
+              printf '%s\n' '=== TRUSTED CONTROL BEGIN ==='
+              cat agent-input/reviewer-context.md
+              printf '%s\n' '=== TRUSTED CONTROL END ==='
+              for evidence in candidate.py candidate-tests.py candidate-provider.md; do
+                if [ -s "agent-input/$evidence" ]; then
+                  printf '%s\n' "=== UNTRUSTED CANDIDATE EVIDENCE BEGIN: $evidence ==="
+                  cat "agent-input/$evidence"
+                  printf '%s\n' "=== UNTRUSTED CANDIDATE EVIDENCE END: $evidence ==="
+                fi
+              done
+              printf '%s\n' 'Review only the bounded bundle above. Do not use tools. Return the exact Reviewer JSON contract.'
+            } > "$bundle"
             set +e
             opencode run --agent reviewer-provider-eval-qwen --model albert/qwen3-coder-30b-A3b-instruct --format json \
-              'Review only the trusted control and materialized candidate evidence. Return the exact Reviewer JSON contract.' \
-              >"/tmp/provider-eval/${case}.jsonl" 2>"/tmp/provider-eval/${case}.stderr"
+              "$(cat "$bundle")" >"/tmp/provider-eval/${case}.jsonl" 2>"/tmp/provider-eval/${case}.stderr"
             status=$?
             set -e
             if [ "$status" -ne 0 ]; then
@@ -126,15 +139,10 @@ jobs:
                 --out "/tmp/provider-eval/results/${case}.json"
               continue
             fi
-
             python3 scripts/reviewer_provider_eval_qwen.py score --case "$case" \
               --decision "/tmp/provider-eval/${case}.decision.json" --out "/tmp/provider-eval/results/${case}.json"
           done
-          if [ "$provider_failed" = true ]; then
-            echo 'provider_failed=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'provider_failed=false' >> "$GITHUB_OUTPUT"
-          fi
+          echo "provider_failed=$provider_failed" >> "$GITHUB_OUTPUT"
 
       - name: Summarize historical result
         id: summary
@@ -174,10 +182,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bundle=/tmp/provider-eval/F1.prompt.txt
+          {
+            printf '%s\n' '=== TRUSTED CONTROL BEGIN ==='
+            cat agent-input/reviewer-context.md
+            printf '%s\n' '=== TRUSTED CONTROL END ==='
+            printf '%s\n' '=== UNTRUSTED CANDIDATE EVIDENCE BEGIN: candidate-diff.txt ==='
+            cat agent-input/candidate-diff.txt
+            printf '%s\n' '=== UNTRUSTED CANDIDATE EVIDENCE END: candidate-diff.txt ==='
+            printf '%s\n' 'Review only the bounded bundle above. Do not use tools. Return the exact Reviewer JSON contract.'
+          } > "$bundle"
           set +e
           opencode run --agent reviewer-provider-eval-qwen --model albert/qwen3-coder-30b-A3b-instruct --format json \
-            'Review only the trusted control and fresh PR evidence. Return the exact Reviewer JSON contract.' \
-            > /tmp/provider-eval/F1.jsonl 2>/tmp/provider-eval/F1.stderr
+            "$(cat "$bundle")" > /tmp/provider-eval/F1.jsonl 2>/tmp/provider-eval/F1.stderr
           status=$?
           set -e
           if [ "$status" -ne 0 ]; then
@@ -186,7 +203,6 @@ jobs:
             echo 'F1 provider/model invocation failed; fresh review remains UNPROVEN.' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-
           set +e
           python3 scripts/agent_reviewer_validate.py /tmp/provider-eval/F1.jsonl /tmp/provider-eval/F1.decision.json \
             >/tmp/provider-eval/F1.validator.stdout 2>/tmp/provider-eval/F1.validator.stderr
@@ -199,7 +215,6 @@ jobs:
             echo 'F1 model output failed deterministic validation; fresh review remains UNPROVEN.' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-
           {
             echo
             echo '### Fresh PR #64 qualitative result'
