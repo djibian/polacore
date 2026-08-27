@@ -1,0 +1,76 @@
+name: PolaCore Albert Reviewer Model Catalog
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 65 &&
+       github.event.issue.pull_request == null &&
+       github.event.comment.body == '/observe-albert-reviewer-models' &&
+       github.actor == github.repository_owner)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require trusted invocation boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/engineering' || { echo 'catalog observation must run from trusted engineering' >&2; exit 1; }
+          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER" || { echo 'catalog observation requires repository owner invocation' >&2; exit 1; }
+
+      - name: Checkout exact trusted invocation SHA without persistent credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Require Albert secret
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: test -n "${ALBERT_API_KEY:-}" || { echo 'ALBERT_API_KEY is missing' >&2; exit 1; }
+
+      - name: Observe authenticated code-model identifiers only
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          response=/tmp/albert-models.json
+          curl --fail --silent --show-error --connect-timeout 15 --max-time 30 \
+            -H "Authorization: Bearer ${ALBERT_API_KEY}" \
+            https://albert.api.etalab.gouv.fr/v1/models \
+            > "$response"
+          python3 - "$response" <<'PY'
+          import json
+          import re
+          import sys
+
+          with open(sys.argv[1], encoding='utf-8') as fh:
+              payload = json.load(fh)
+          ids = sorted({str(item.get('id')) for item in payload.get('data', []) if item.get('id')})
+          code_like = [model_id for model_id in ids if re.search(r'(mistral|qwen|deepseek|gpt|coder|code)', model_id, re.I)]
+          if not code_like:
+              raise SystemExit('authenticated catalogue contains no code-relevant model identifiers')
+          print('authenticated_code_model_ids=' + json.dumps(code_like, ensure_ascii=True, separators=(',', ':')))
+          PY
+
+      - name: Report trusted observer identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'trusted_runner_sha=%s\nobserver_sha256=%s\nprovider=albert\nendpoint=/v1/models\nauthority=read-only-catalog-observation\n' \
+            "$(git rev-parse HEAD)" \
+            "$(sha256sum .github/workflows/agent-reviewer-provider-catalog.yml | awk '{print $1}')"
