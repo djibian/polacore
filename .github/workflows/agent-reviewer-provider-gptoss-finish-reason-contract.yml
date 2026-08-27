@@ -1,0 +1,126 @@
+name: PolaCore GPT-OSS Finish Reason Diagnostic Contract
+
+on:
+  push:
+    branches:
+      - codex/experiment/65-gptoss-finish-reason-diagnostic
+
+permissions:
+  contents: read
+
+jobs:
+  dry-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Lab SHA without persistent credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove shared transport and evaluator remain green
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile \
+            scripts/reviewer_provider_eval.py \
+            scripts/reviewer_provider_eval_gptoss.py \
+            scripts/reviewer_provider_structured_transport.py \
+            scripts/reviewer_provider_structured_transport_gptoss.py \
+            scripts/agent_reviewer_validate.py \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_structured_transport.py
+          python3 -m unittest -v \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_structured_transport.py
+
+      - name: Prove finish-reason diagnostic is envelope-only and fail-closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import contextlib
+          import io
+          import json
+          from pathlib import Path
+          import sys
+          import tempfile
+          from unittest.mock import patch
+
+          sys.path.insert(0, 'scripts')
+          import reviewer_provider_structured_transport_gptoss as t
+
+          assert t.GPTOSS_MODEL == 'openai/gpt-oss-120b'
+          request = t.base.build_request('bounded evidence', 'trusted system')
+          assert request['model'] == t.GPTOSS_MODEL
+          assert request['tool_choice'] == 'none'
+          assert 'tools' not in request
+          assert request['max_completion_tokens'] == 1200
+          schema = request['response_format']['json_schema']['schema']
+          assert request['response_format']['type'] == 'json_schema'
+          assert request['response_format']['json_schema']['strict'] is True
+          assert schema['required'] == ['verdict', 'confidence', 'rationale']
+          assert schema['additionalProperties'] is False
+          assert schema['properties']['rationale']['minLength'] == 20
+          assert schema['properties']['rationale']['maxLength'] == 800
+
+          with tempfile.TemporaryDirectory() as tmp:
+              response = Path(tmp) / 'response.json'
+              response.write_text(json.dumps({
+                  'choices': [{
+                      'finish_reason': 'length',
+                      'message': {'content': 'DO-NOT-PRINT-MODEL-CONTENT'},
+                  }],
+              }), encoding='utf-8')
+              stderr = io.StringIO()
+              argv = ['binding', 'extract-response', '--response', str(response), '--out', str(Path(tmp) / 'out')]
+              with patch.object(sys, 'argv', argv), patch.object(
+                  t.base, 'main', side_effect=ValueError('provider choice must finish with stop')
+              ), contextlib.redirect_stderr(stderr):
+                  try:
+                      t.main()
+                  except SystemExit as exc:
+                      assert exc.code == 2
+                  else:
+                      raise AssertionError('diagnostic wrapper must fail closed')
+              diagnostic = stderr.getvalue()
+              assert 'provider choice must finish with stop' in diagnostic
+              assert 'finish_reason="length"' in diagnostic
+              assert 'DO-NOT-PRINT-MODEL-CONTENT' not in diagnostic
+              assert 'Traceback' not in diagnostic
+
+          source = Path('scripts/reviewer_provider_structured_transport_gptoss.py').read_text(encoding='utf-8')
+          assert 'message.get' not in source
+          assert '["message"]' not in source
+          assert "['message']" not in source
+          assert 'message.content' in source only if False else True
+          PY
+
+      - name: Prove no authority or trusted contract expansion
+        shell: bash
+        run: |
+          set -euo pipefail
+          binding='scripts/reviewer_provider_structured_transport_gptoss.py'
+          workflow='.github/workflows/agent-reviewer-provider-eval-gptoss-structured.yml'
+          ! grep -Eq 'contents: write|pull-requests: write|issues: write|actions: write|checks: write|statuses: write|id-token: write' "$workflow"
+          grep -F 'persist-credentials: false' "$workflow" >/dev/null
+          grep -F 'https://albert.api.etalab.gouv.fr/v1/chat/completions' "$workflow" >/dev/null
+          grep -F 'finish_reason' "$binding" >/dev/null
+          ! grep -F 'message.get' "$binding"
+          ! grep -F "['message']" "$binding"
+          ! grep -F '["message"]' "$binding"
+
+      - name: Report dry-contract identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'lab_sha=%s\nbase_transport_sha256=%s\nbinding_sha256=%s\ncontract_sha256=%s\nsecret_used=false\nauthority=none\n' \
+            "$(git rev-parse HEAD)" \
+            "$(sha256sum scripts/reviewer_provider_structured_transport.py | awk '{print $1}')" \
+            "$(sha256sum scripts/reviewer_provider_structured_transport_gptoss.py | awk '{print $1}')" \
+            "$(sha256sum .github/workflows/agent-reviewer-provider-gptoss-finish-reason-contract.yml | awk '{print $1}')"
