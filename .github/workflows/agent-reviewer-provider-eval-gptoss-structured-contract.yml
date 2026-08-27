@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - codex/experiment/65-gptoss-json-schema-transport
+      - codex/experiment/65-gptoss-structured-diagnostic
   workflow_dispatch:
 
 permissions:
@@ -52,12 +53,15 @@ jobs:
             tests/test_reviewer_provider_eval.py \
             tests/test_reviewer_provider_structured_transport.py
 
-      - name: Prove GPT-OSS binding changes only provider model identity
+      - name: Prove GPT-OSS binding changes only provider model identity and fail-closed diagnostics
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import contextlib
+          import io
           import sys
+          from unittest.mock import patch
           sys.path.insert(0,'scripts')
           import reviewer_provider_eval_gptoss as g
           import reviewer_provider_structured_transport_gptoss as t
@@ -77,6 +81,18 @@ jobs:
           assert schema['additionalProperties'] is False
           assert schema['properties']['rationale']['minLength'] == 20
           assert schema['properties']['rationale']['maxLength'] == 800
+          stderr=io.StringIO()
+          with patch.object(t.base, 'main', side_effect=ValueError('provider choice must finish with stop')):
+              with contextlib.redirect_stderr(stderr):
+                  try:
+                      t.main()
+                  except SystemExit as exc:
+                      assert exc.code == 2
+                  else:
+                      raise AssertionError('diagnostic wrapper must fail closed')
+          diagnostic=stderr.getvalue()
+          assert 'provider choice must finish with stop' in diagnostic
+          assert 'Traceback' not in diagnostic
           PY
 
       - name: Materialize identical blind historical candidates
