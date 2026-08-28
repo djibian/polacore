@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(sha256sum scripts/reviewer_executable_challenge.py | awk '{print $1}')" = 'b6c7d5709c2f00cb648ad235329d4676109fcb651bdde2d5166656c1a81b3f05'
+          test "$(sha256sum scripts/reviewer_executable_challenge.py | awk '{print $1}')" = '516f6f97d796b7d7614b05b177cabc2a51b3a7950aa14a8514443d5b9428a093'
           python3 -m py_compile \
             scripts/reviewer_executable_challenge.py \
             scripts/reviewer_executable_historical.py \
