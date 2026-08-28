@@ -1,0 +1,150 @@
+name: PolaCore Mistral Multipass Reviewer Contract
+
+on:
+  push:
+    branches:
+      - codex/experiment/65-multipass-mistral
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Lab SHA with history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch exact historical corpus commits without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for sha in \
+            86d66be36f4ea10a0a83b7fac1639951f1df72c1 \
+            884ef3c07c9c19f13d11bbbe1dbc3211f748b586 \
+            4236ed98f937b1e1fd9dcaefddffe711f0673a8f; do
+            git fetch --no-tags --no-recurse-submodules origin "$sha"
+            git cat-file -e "${sha}^{commit}"
+          done
+
+      - name: Run all deterministic Reviewer contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile \
+            scripts/reviewer_provider_eval.py \
+            scripts/reviewer_provider_eval_mistral.py \
+            scripts/reviewer_provider_structured_transport.py \
+            scripts/agent_reviewer_validate.py \
+            scripts/reviewer_multipass_aggregate.py \
+            scripts/reviewer_multipass_benchmark.py \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_structured_transport.py \
+            tests/test_reviewer_multipass_aggregate.py \
+            tests/test_reviewer_multipass_benchmark.py
+          python3 -m unittest -v \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_structured_transport.py \
+            tests/test_reviewer_multipass_aggregate.py \
+            tests/test_reviewer_multipass_benchmark.py
+
+      - name: Prove blind prompt separation and pass independence
+        shell: bash
+        run: |
+          set -euo pipefail
+          prompts=(
+            .opencode/agents/reviewer-multipass-mistral-behavioral.md
+            .opencode/agents/reviewer-multipass-mistral-consistency.md
+            .opencode/agents/reviewer-multipass-mistral-security.md
+          )
+          for prompt in "${prompts[@]}"; do
+            grep -F 'mistral-small-3-2-24b-instruct-2506' "$prompt" >/dev/null
+            grep -F 'exactly one JSON object and nothing else' "$prompt" >/dev/null
+            grep -F 'never see their outputs' "$prompt" >/dev/null
+            ! grep -Eq 'H1|H2|H3|H4|DETECTED|known_signature_matches|c790315c92663aa7b15b9a626ae5d9fc07d3e378|9a653e50d1bec813ae738106cd65e0b2cde29dcb|a821bcae50dadfd3f4d758056585162065d6ea30' "$prompt"
+          done
+          grep -F 'behavioral semantics and state transitions' "${prompts[0]}" >/dev/null
+          grep -F 'implementation and contract consistency' "${prompts[1]}" >/dev/null
+          grep -F 'security, credentials, capabilities, and authority boundaries' "${prompts[2]}" >/dev/null
+
+      - name: Materialize identical blind evidence and prove stricter negative control
+        shell: bash
+        run: |
+          set -euo pipefail
+          for case in H1 H2 H3 H4; do
+            out="/tmp/multipass-materialize-$case"
+            rm -rf "$out"
+            python3 scripts/reviewer_provider_eval_mistral.py materialize --case "$case" --out "$out"
+            test -s "$out/reviewer-context.md"
+            test -s "$out/candidate.py"
+          done
+          python3 - <<'PY'
+          from scripts import reviewer_multipass_aggregate as a
+          from scripts import reviewer_multipass_benchmark as b
+          assert a.REQUIRED_PASSES == (
+              'behavioral_semantics',
+              'implementation_consistency',
+              'security_authority',
+          )
+          assert b.HISTORICAL_CASES == ('H1','H2','H3')
+          assert b.NEGATIVE_CONTROL == 'H4'
+          assert b.MODEL == 'mistral-small-3-2-24b-instruct-2506'
+          PY
+
+      - name: Prove trusted read-only live boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/agent-reviewer-provider-eval-multipass-mistral.yml
+          grep -F 'workflow_dispatch:' "$workflow" >/dev/null
+          grep -F 'issue_comment:' "$workflow" >/dev/null
+          grep -F "github.event.comment.body == '/run-albert-reviewer-eval-multipass-mistral'" "$workflow" >/dev/null
+          grep -F 'github.actor == github.repository_owner' "$workflow" >/dev/null
+          grep -F 'persist-credentials: false' "$workflow" >/dev/null
+          grep -F 'contents: read' "$workflow" >/dev/null
+          grep -F 'mistral-small-3-2-24b-instruct-2506' "$workflow" >/dev/null
+          grep -F 'https://albert.api.etalab.gouv.fr/v1/chat/completions' "$workflow" >/dev/null
+          grep -F 'scripts/agent_reviewer_validate.py' "$workflow" >/dev/null
+          grep -F 'scripts/reviewer_provider_eval_mistral.py score' "$workflow" >/dev/null
+          grep -F 'scripts/reviewer_multipass_aggregate.py' "$workflow" >/dev/null
+          grep -F 'scripts/reviewer_multipass_benchmark.py summarize' "$workflow" >/dev/null
+          ! grep -Eq 'contents: write|pull-requests: write|issues: write|actions: write|checks: write|statuses: write|id-token: write' "$workflow"
+          ! grep -Eq 'GH_TOKEN|pull-requests: write|gh pr|merge|approve|label' "$workflow"
+          ! grep -Eq 'c790315c92663aa7b15b9a626ae5d9fc07d3e378|9a653e50d1bec813ae738106cd65e0b2cde29dcb|a821bcae50dadfd3f4d758056585162065d6ea30' "$workflow"
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('.github/workflows/agent-reviewer-provider-eval-multipass-mistral.yml').read_text()
+          assert ('ref: $' + '{{ github.sha }}') in text
+          assert "for pass_id in behavioral_semantics implementation_consistency security_authority; do" in text
+          assert 'Perform only your assigned independent review dimension.' in text
+          # No pass output is appended to the common candidate bundle.
+          bundle=text[text.index("bundle=\"$case_dir/bundle.txt\""):text.index('records=()')]
+          assert '.decision.json' not in bundle
+          assert '.score.json' not in bundle
+          assert '.record.json' not in bundle
+          PY
+
+      - name: Report dry-contract identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "lab_sha=$(git rev-parse HEAD)"
+          sha256sum \
+            scripts/reviewer_multipass_aggregate.py \
+            scripts/reviewer_multipass_benchmark.py \
+            tests/test_reviewer_multipass_aggregate.py \
+            tests/test_reviewer_multipass_benchmark.py \
+            .opencode/agents/reviewer-multipass-mistral-behavioral.md \
+            .opencode/agents/reviewer-multipass-mistral-consistency.md \
+            .opencode/agents/reviewer-multipass-mistral-security.md \
+            .github/workflows/agent-reviewer-provider-eval-multipass-mistral.yml \
+            .github/workflows/agent-reviewer-provider-eval-multipass-mistral-contract.yml

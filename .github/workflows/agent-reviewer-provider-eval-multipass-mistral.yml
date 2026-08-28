@@ -1,0 +1,222 @@
+name: PolaCore Mistral Multipass Reviewer Evaluation
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 65 &&
+       github.event.issue.pull_request == null &&
+       github.event.comment.body == '/run-albert-reviewer-eval-multipass-mistral' &&
+       github.actor == github.repository_owner)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - name: Require trusted invocation boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/engineering' || { echo 'evaluation must run from trusted engineering' >&2; exit 1; }
+          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER" || { echo 'evaluation requires repository owner invocation' >&2; exit 1; }
+
+      - name: Checkout exact trusted invocation SHA with history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch exact historical corpus commits without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for sha in \
+            86d66be36f4ea10a0a83b7fac1639951f1df72c1 \
+            884ef3c07c9c19f13d11bbbe1dbc3211f748b586 \
+            4236ed98f937b1e1fd9dcaefddffe711f0673a8f; do
+            git fetch --no-tags --no-recurse-submodules origin "$sha"
+            git cat-file -e "${sha}^{commit}"
+          done
+
+      - name: Verify runner identity and deterministic contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile \
+            scripts/reviewer_provider_eval.py \
+            scripts/reviewer_provider_eval_mistral.py \
+            scripts/reviewer_provider_structured_transport.py \
+            scripts/agent_reviewer_validate.py \
+            scripts/reviewer_multipass_aggregate.py \
+            scripts/reviewer_multipass_benchmark.py \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_structured_transport.py \
+            tests/test_reviewer_multipass_aggregate.py \
+            tests/test_reviewer_multipass_benchmark.py
+          python3 -m unittest -v \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_structured_transport.py \
+            tests/test_reviewer_multipass_aggregate.py \
+            tests/test_reviewer_multipass_benchmark.py
+
+      - name: Require Albert secret
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: test -n "${ALBERT_API_KEY:-}" || { echo 'ALBERT_API_KEY is missing' >&2; exit 1; }
+
+      - name: Verify Mistral is authorized by current Albert catalogue
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --connect-timeout 15 --max-time 30 \
+            -H "Authorization: Bearer ${ALBERT_API_KEY}" \
+            https://albert.api.etalab.gouv.fr/v1/models \
+            | python3 -c 'import json,sys; ids={str(x.get("id")) for x in json.load(sys.stdin).get("data",[]) if x.get("id")}; assert "mistral-small-3-2-24b-instruct-2506" in ids'
+
+      - name: Evaluate blind corpus through independent specialized passes
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/multipass
+          mkdir -p "$root"
+          declare -A agents=(
+            [behavioral_semantics]='.opencode/agents/reviewer-multipass-mistral-behavioral.md'
+            [implementation_consistency]='.opencode/agents/reviewer-multipass-mistral-consistency.md'
+            [security_authority]='.opencode/agents/reviewer-multipass-mistral-security.md'
+          )
+
+          for case in H1 H2 H3 H4; do
+            case_dir="$root/$case"
+            mkdir -p "$case_dir"
+            rm -rf agent-input
+            python3 scripts/reviewer_provider_eval_mistral.py materialize --case "$case" --out agent-input
+            bundle="$case_dir/bundle.txt"
+            {
+              printf '%s\n' '=== TRUSTED CONTROL BEGIN ==='
+              cat agent-input/reviewer-context.md
+              printf '%s\n' '=== TRUSTED CONTROL END ==='
+              for evidence in candidate.py candidate-tests.py candidate-provider.md; do
+                if [ -s "agent-input/$evidence" ]; then
+                  printf '%s\n' "=== UNTRUSTED CANDIDATE EVIDENCE BEGIN: $evidence ==="
+                  cat "agent-input/$evidence"
+                  printf '%s\n' "=== UNTRUSTED CANDIDATE EVIDENCE END: $evidence ==="
+                fi
+              done
+              printf '%s\n' 'Review only the bounded bundle above. Perform only your assigned independent review dimension. Do not use tools. Return the exact Reviewer JSON contract.'
+            } > "$bundle"
+
+            records=()
+            for pass_id in behavioral_semantics implementation_consistency security_authority; do
+              request="$case_dir/$pass_id.request.json"
+              response="$case_dir/$pass_id.response.json"
+              jsonl="$case_dir/$pass_id.jsonl"
+              decision="$case_dir/$pass_id.decision.json"
+              record="$case_dir/$pass_id.record.json"
+              score="$case_dir/$pass_id.score.json"
+              records+=("$record")
+
+              python3 scripts/reviewer_provider_structured_transport.py build-request \
+                --bundle "$bundle" --agent "${agents[$pass_id]}" --out "$request"
+
+              set +e
+              curl --fail-with-body --silent --show-error --connect-timeout 15 --max-time 120 \
+                -H "Authorization: Bearer ${ALBERT_API_KEY}" \
+                -H 'Content-Type: application/json' \
+                --data-binary "@$request" \
+                https://albert.api.etalab.gouv.fr/v1/chat/completions \
+                >"$response" 2>"$case_dir/$pass_id.curl.stderr"
+              request_status=$?
+              set -e
+              if [ "$request_status" -ne 0 ]; then
+                python3 scripts/reviewer_multipass_benchmark.py record-failure \
+                  --case "$case" --pass-id "$pass_id" --status PROVIDER_FAILURE \
+                  --reason 'structured chat-completion request exited nonzero' --out "$record"
+                continue
+              fi
+
+              set +e
+              python3 scripts/reviewer_provider_structured_transport.py extract-response \
+                --response "$response" --out "$jsonl" \
+                >"$case_dir/$pass_id.extract.stdout" 2>"$case_dir/$pass_id.extract.stderr"
+              extract_status=$?
+              set -e
+              if [ "$extract_status" -ne 0 ]; then
+                reason="$(tail -n 1 "$case_dir/$pass_id.extract.stderr" | cut -c1-300)"
+                python3 scripts/reviewer_multipass_benchmark.py record-failure \
+                  --case "$case" --pass-id "$pass_id" --status PROVIDER_FAILURE \
+                  --reason "structured provider response rejected: ${reason}" --out "$record"
+                continue
+              fi
+
+              set +e
+              python3 scripts/agent_reviewer_validate.py "$jsonl" "$decision" \
+                >"$case_dir/$pass_id.validator.stdout" 2>"$case_dir/$pass_id.validator.stderr"
+              validation_status=$?
+              set -e
+              if [ "$validation_status" -ne 0 ]; then
+                reason="$(tail -n 1 "$case_dir/$pass_id.validator.stderr" | cut -c1-400)"
+                python3 scripts/reviewer_multipass_benchmark.py record-failure \
+                  --case "$case" --pass-id "$pass_id" --status MODEL_OUTPUT_INVALID \
+                  --reason "$reason" --out "$record"
+                continue
+              fi
+
+              python3 scripts/reviewer_multipass_benchmark.py record-valid \
+                --case "$case" --pass-id "$pass_id" --decision "$decision" --out "$record"
+              python3 scripts/reviewer_provider_eval_mistral.py score \
+                --case "$case" --decision "$decision" --out "$score"
+            done
+
+            python3 scripts/reviewer_multipass_aggregate.py \
+              --inputs "${records[@]}" --out "$case_dir/aggregate.json"
+          done
+
+          python3 scripts/reviewer_multipass_benchmark.py summarize \
+            --root "$root" --out "$root/summary.json"
+
+      - name: Print reproducible evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/multipass
+          printf 'trusted_runner_sha=%s\nprovider=albert\nmodel=mistral-small-3-2-24b-instruct-2506\narchitecture=three_pass_falsifying\ntransport=json_schema\nauthority=INFERENCE_ONLY\n' "$(git rev-parse HEAD)"
+          sha256sum \
+            scripts/reviewer_multipass_aggregate.py \
+            scripts/reviewer_multipass_benchmark.py \
+            scripts/reviewer_provider_eval.py \
+            scripts/reviewer_provider_structured_transport.py \
+            scripts/agent_reviewer_validate.py \
+            .opencode/agents/reviewer-multipass-mistral-behavioral.md \
+            .opencode/agents/reviewer-multipass-mistral-consistency.md \
+            .opencode/agents/reviewer-multipass-mistral-security.md \
+            .github/workflows/agent-reviewer-provider-eval-multipass-mistral.yml
+          if [ -d "$root" ]; then
+            for case in H1 H2 H3 H4; do
+              for pass_id in behavioral_semantics implementation_consistency security_authority; do
+                for suffix in record score decision; do
+                  f="$root/$case/$pass_id.$suffix.json"
+                  if [ -f "$f" ]; then echo "--- $f"; cat "$f"; fi
+                done
+              done
+              f="$root/$case/aggregate.json"
+              if [ -f "$f" ]; then echo "--- $f"; cat "$f"; fi
+            done
+            if [ -f "$root/summary.json" ]; then echo '--- summary'; cat "$root/summary.json"; fi
+          fi
