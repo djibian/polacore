@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - codex/experiment/65-multipass-mistral
+      - codex/experiment/65-multipass-cli-import-fix
   workflow_dispatch:
 
 permissions:
@@ -56,6 +57,29 @@ jobs:
             tests/test_reviewer_provider_structured_transport.py \
             tests/test_reviewer_multipass_aggregate.py \
             tests/test_reviewer_multipass_benchmark.py
+
+      - name: Exercise multipass benchmark through its production CLI path
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          cat >"$tmp/decision.json" <<'JSON'
+          {"verdict":"READY_FOR_HUMAN","confidence":0.9,"rationale":"The direct CLI smoke test preserves one validated independent bounded Reviewer decision."}
+          JSON
+          python3 scripts/reviewer_multipass_benchmark.py record-valid \
+            --case H1 \
+            --pass-id behavioral_semantics \
+            --decision "$tmp/decision.json" \
+            --out "$tmp/record.json"
+          python3 - "$tmp/record.json" <<'PY'
+          import json
+          import sys
+          with open(sys.argv[1], encoding='utf-8') as fh:
+              record=json.load(fh)
+          assert record['status'] == 'VALID'
+          assert record['pass_id'] == 'behavioral_semantics'
+          assert record['decision']['verdict'] == 'READY_FOR_HUMAN'
+          PY
 
       - name: Prove blind prompt separation and pass independence
         shell: bash
