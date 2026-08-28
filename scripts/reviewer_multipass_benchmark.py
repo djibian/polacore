@@ -13,7 +13,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from scripts import reviewer_multipass_aggregate as multipass
+if __package__:
+    from . import reviewer_multipass_aggregate as multipass
+else:
+    import reviewer_multipass_aggregate as multipass
 
 SCHEMA = "polacore.reviewer-multipass-benchmark/v1"
 MODEL = "mistral-small-3-2-24b-instruct-2506"
