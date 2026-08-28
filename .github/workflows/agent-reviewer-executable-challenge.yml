@@ -1,0 +1,251 @@
+name: PolaCore Blind Executable Reviewer Challenge Evaluation
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  synthesize:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 90 &&
+       github.event.issue.pull_request == null &&
+       github.event.comment.body == '/run-executable-reviewer-challenge' &&
+       github.actor == github.repository_owner)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      bundle_b64: ${{ steps.pack.outputs.bundle_b64 }}
+    steps:
+      - name: Require trusted invocation boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/engineering' || { echo 'evaluation must run from trusted engineering' >&2; exit 1; }
+          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER" || { echo 'evaluation requires repository owner invocation' >&2; exit 1; }
+
+      - name: Checkout exact trusted synthesis SHA without persistent credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify trusted synthesis identity and deterministic contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(sha256sum scripts/reviewer_executable_challenge.py | awk '{print $1}')" = '516f6f97d796b7d7614b05b177cabc2a51b3a7950aa14a8514443d5b9428a093'
+          test "$(sha256sum scripts/reviewer_executable_historical.py | awk '{print $1}')" = '3a4a3f2fd13f503f09dce233bdb3777925eb6308499a6002b57cbab22a55b24c'
+          test "$(sha256sum scripts/reviewer_executable_blind.py | awk '{print $1}')" = '87e4a9aff2375c335f24871b84c17ba7504135b8f1729c3b9c39c0750875e0c0'
+          test "$(sha256sum scripts/reviewer_challenge_structured_transport.py | awk '{print $1}')" = 'd5463e1fa73bee62f99e42a5a950ea7eb307824a9af7d297e2d1101c4a8841e3'
+          test "$(sha256sum .opencode/agents/reviewer-executable-challenge-qwen.md | awk '{print $1}')" = '9a3212cb432bbfedc790d67f6dbdafa6566ca4cadfc9f36f7d2a949f2216817e'
+          python3 -m py_compile \
+            scripts/reviewer_executable_blind.py \
+            scripts/reviewer_challenge_structured_transport.py \
+            scripts/reviewer_executable_synthesis.py
+          python3 -m unittest -v \
+            tests/test_reviewer_executable_challenge.py \
+            tests/test_reviewer_executable_historical.py \
+            tests/test_reviewer_executable_live_contract.py \
+            tests/test_reviewer_executable_synthesis.py
+
+      - name: Fetch exact blind candidate commits without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > /tmp/blind-candidate-shas
+          from scripts import reviewer_executable_blind as blind
+          for token in sorted(blind.CASES):
+              print(blind.CASES[token])
+          PY
+          while read -r sha; do
+            test -n "$sha"
+            git fetch --no-tags --no-recurse-submodules origin "$sha"
+            git cat-file -e "${sha}^{commit}"
+          done < /tmp/blind-candidate-shas
+
+      - name: Require Albert secret
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: test -n "${ALBERT_API_KEY:-}" || { echo 'ALBERT_API_KEY is missing' >&2; exit 1; }
+
+      - name: Verify exact synthesis model is currently authorized
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --connect-timeout 15 --max-time 30 \
+            -H "Authorization: Bearer $ALBERT_API_KEY" \
+            https://albert.api.etalab.gouv.fr/v1/models \
+            | python3 -c 'import json,sys; ids={str(x.get("id")) for x in json.load(sys.stdin).get("data",[]) if x.get("id")}; assert "qwen3-coder-30b-A3b-instruct" in ids'
+
+      - name: Synthesize and statically validate blind challenges only
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/executable-synthesis
+          mkdir -p "$root"
+          for case in alpha beta gamma delta; do
+            bundle="$root/$case.bundle.txt"
+            request="$root/$case.request.json"
+            response="$root/$case.response.json"
+            challenge="$root/$case.challenge.json"
+            record="$root/$case.record.json"
+            python3 scripts/reviewer_executable_blind.py bundle --case "$case" --out "$bundle"
+            python3 scripts/reviewer_challenge_structured_transport.py build-request \
+              --bundle "$bundle" \
+              --agent .opencode/agents/reviewer-executable-challenge-qwen.md \
+              --out "$request"
+
+            set +e
+            curl --fail-with-body --silent --show-error --connect-timeout 15 --max-time 150 \
+              -H "Authorization: Bearer $ALBERT_API_KEY" \
+              -H 'Content-Type: application/json' \
+              --data-binary "@$request" \
+              https://albert.api.etalab.gouv.fr/v1/chat/completions \
+              >"$response" 2>"$root/$case.curl.stderr"
+            request_status=$?
+            set -e
+            if [ "$request_status" -ne 0 ]; then
+              reason="$(tr '\n' ' ' <"$root/$case.curl.stderr" | cut -c1-400)"
+              test -n "$reason" || reason="provider request failed with exit $request_status"
+              python3 scripts/reviewer_executable_synthesis.py record \
+                --case "$case" --status PROVIDER_FAILURE --reason "$reason" --out "$record"
+              continue
+            fi
+
+            set +e
+            python3 scripts/reviewer_challenge_structured_transport.py extract-response \
+              --response "$response" --out "$challenge" \
+              >"$root/$case.extract.stdout" 2>"$root/$case.extract.stderr"
+            extract_status=$?
+            set -e
+            if [ "$extract_status" -ne 0 ]; then
+              reason="$(tr '\n' ' ' <"$root/$case.extract.stderr" | cut -c1-400)"
+              test -n "$reason" || reason="model output failed trusted validation"
+              python3 scripts/reviewer_executable_synthesis.py record \
+                --case "$case" --status MODEL_OUTPUT_INVALID --reason "$reason" --out "$record"
+              continue
+            fi
+
+            python3 scripts/reviewer_executable_synthesis.py record \
+              --case "$case" --status VALID --challenge "$challenge" --out "$record"
+          done
+          python3 scripts/reviewer_executable_synthesis.py summarize \
+            --inputs "$root"/alpha.record.json "$root"/beta.record.json "$root"/gamma.record.json "$root"/delta.record.json \
+            --out "$root/synthesis.json"
+
+      - name: Emit bounded validated synthesis bundle
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          path=/tmp/executable-synthesis/synthesis.json
+          test -s "$path"
+          bytes="$(wc -c < "$path")"
+          test "$bytes" -le 100000
+          bundle_b64="$(base64 -w0 "$path")"
+          test "${#bundle_b64}" -le 150000
+          echo "bundle_b64=$bundle_b64" >> "$GITHUB_OUTPUT"
+
+  execute:
+    needs: synthesize
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Require no-secret causal execution boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/engineering'
+          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER"
+          test -z "${ALBERT_API_KEY:-}"
+          test -z "${GITHUB_TOKEN:-}"
+
+      - name: Checkout exact trusted oracle SHA without persistent credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify trusted oracle identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(sha256sum scripts/reviewer_executable_challenge.py | awk '{print $1}')" = '516f6f97d796b7d7614b05b177cabc2a51b3a7950aa14a8514443d5b9428a093'
+          test "$(sha256sum scripts/reviewer_executable_historical.py | awk '{print $1}')" = '3a4a3f2fd13f503f09dce233bdb3777925eb6308499a6002b57cbab22a55b24c'
+          test "$(sha256sum scripts/reviewer_executable_oracle.py | awk '{print $1}')" = 'b89fecf79bd6be9109aaa4eab21959f3d5bd95777262df8834c5c52ac23da798'
+          python3 -m py_compile scripts/reviewer_executable_oracle.py
+
+      - name: Decode and revalidate synthesis bundle
+        env:
+          SYNTHESIS_B64: ${{ needs.synthesize.outputs.bundle_b64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SYNTHESIS_B64"
+          printf '%s' "$SYNTHESIS_B64" | base64 --decode > /tmp/synthesis.json
+          test "$(wc -c < /tmp/synthesis.json)" -le 100000
+          python3 - /tmp/synthesis.json <<'PY'
+          import json, pathlib, sys
+          from scripts import reviewer_executable_oracle as oracle
+          value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          oracle._validate_synthesis(value)
+          PY
+
+      - name: Fetch exact hidden causal corpus without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for sha in $(python3 scripts/reviewer_executable_oracle.py required-shas); do
+            git fetch --no-tags --no-recurse-submodules origin "$sha"
+            git cat-file -e "${sha}^{commit}"
+          done
+
+      - name: Execute same challenge bytes against candidate and hidden repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/reviewer_executable_oracle.py evaluate \
+            --synthesis /tmp/synthesis.json \
+            --out /tmp/executable-oracle-result.json
+          {
+            echo '## Blind executable Reviewer challenge experiment'
+            echo
+            echo '```json'
+            cat /tmp/executable-oracle-result.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Print reproducible evidence identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'trusted_runner_sha=%s\nmodel=qwen3-coder-30b-A3b-instruct\nauthority=EXECUTABLE_EVIDENCE_ONLY\n' "$(git rev-parse HEAD)"
+          sha256sum \
+            scripts/reviewer_executable_challenge.py \
+            scripts/reviewer_executable_historical.py \
+            scripts/reviewer_executable_blind.py \
+            scripts/reviewer_challenge_structured_transport.py \
+            scripts/reviewer_executable_synthesis.py \
+            scripts/reviewer_executable_oracle.py \
+            .opencode/agents/reviewer-executable-challenge-qwen.md \
+            /tmp/synthesis.json \
+            /tmp/executable-oracle-result.json
