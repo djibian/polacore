@@ -1,0 +1,112 @@
+name: PolaCore Reviewer Multipass Aggregate Contract
+
+on:
+  push:
+    branches:
+      - codex/experiment/65-multipass-aggregate
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Lab SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Run deterministic multipass tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile \
+            scripts/reviewer_multipass_aggregate.py \
+            tests/test_reviewer_multipass_aggregate.py
+          python3 -m unittest -v tests/test_reviewer_multipass_aggregate.py
+
+      - name: Prove offline non-authorizing boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            scripts/reviewer_multipass_aggregate.py
+            tests/test_reviewer_multipass_aggregate.py
+            .github/workflows/agent-reviewer-multipass-aggregate-contract.yml
+          )
+          ! grep -Eq 'ALBERT_API_KEY|GH_TOKEN|GITHUB_TOKEN|secrets\.|chat/completions|/v1/models' "${files[@]}"
+          ! grep -Eq 'requests|urllib|httpx|socket|subprocess|os\.system|Popen' scripts/reviewer_multipass_aggregate.py
+          ! grep -Eq 'contents: write|pull-requests: write|issues: write|actions: write|checks: write|statuses: write|id-token: write' .github/workflows/agent-reviewer-multipass-aggregate-contract.yml
+          ! grep -Eq 'c790315c92663aa7b15b9a626ae5d9fc07d3e378|9a653e50d1bec813ae738106cd65e0b2cde29dcb|a821bcae50dadfd3f4d758056585162065d6ea30' "${files[@]}"
+          grep -F 'authority": "INFERENCE_ONLY"' scripts/reviewer_multipass_aggregate.py >/dev/null
+          grep -F 'behavioral_semantics' scripts/reviewer_multipass_aggregate.py >/dev/null
+          grep -F 'implementation_consistency' scripts/reviewer_multipass_aggregate.py >/dev/null
+          grep -F 'security_authority' scripts/reviewer_multipass_aggregate.py >/dev/null
+
+      - name: Prove no-majority and failure semantics through CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          export TMP_MULTIPASS="$tmp"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from scripts import reviewer_multipass_aggregate as m
+
+          root = Path(os.environ['TMP_MULTIPASS'])
+          for pass_id in m.REQUIRED_PASSES:
+              row = {
+                  'schema': m.PASS_SCHEMA,
+                  'case': 'synthetic',
+                  'pass_id': pass_id,
+                  'status': 'VALID',
+                  'decision': {
+                      'verdict': 'READY_FOR_HUMAN',
+                      'confidence': 0.90,
+                      'rationale': f'{pass_id} completed an independent bounded review pass.',
+                  },
+              }
+              (root / f'{pass_id}.json').write_text(json.dumps(row), encoding='utf-8')
+
+          blocking = json.loads((root / 'implementation_consistency.json').read_text())
+          blocking['decision']['verdict'] = 'CHANGES_REQUIRED'
+          blocking['decision']['rationale'] = 'Implementation consistency found one concrete blocking defect in the bounded candidate.'
+          (root / 'implementation_consistency.json').write_text(json.dumps(blocking), encoding='utf-8')
+          PY
+          python3 scripts/reviewer_multipass_aggregate.py \
+            --inputs \
+              "$tmp/behavioral_semantics.json" \
+              "$tmp/implementation_consistency.json" \
+              "$tmp/security_authority.json" \
+            --out "$tmp/aggregate.json"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          result = json.loads((Path(os.environ['TMP_MULTIPASS']) / 'aggregate.json').read_text())
+          assert result['status'] == 'COMPLETE'
+          assert result['disposition'] == 'BLOCKING'
+          assert result['aggregate_verdict'] == 'CHANGES_REQUIRED'
+          assert result['blocking_passes'] == ['implementation_consistency']
+          assert result['authority'] == 'INFERENCE_ONLY'
+          PY
+
+      - name: Report dry-contract identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "lab_sha=$(git rev-parse HEAD)"
+          sha256sum \
+            scripts/reviewer_multipass_aggregate.py \
+            tests/test_reviewer_multipass_aggregate.py \
+            .github/workflows/agent-reviewer-multipass-aggregate-contract.yml
