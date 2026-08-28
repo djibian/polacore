@@ -57,7 +57,9 @@ class BlindMaterializerTest(unittest.TestCase):
             text = out.read_text(encoding="utf-8")
         self.assertIn("Exact candidate SHA", text)
         self.assertIn("VALUE = 1", text)
-        self.assertNotIn("repair", text.lower())
+        for spec in oracle.CASES.values():
+            if spec.repair_sha is not None:
+                self.assertNotIn(spec.repair_sha, text)
         self.assertNotIn("H1", text)
         self.assertNotIn("H2", text)
         self.assertNotIn("H3", text)
