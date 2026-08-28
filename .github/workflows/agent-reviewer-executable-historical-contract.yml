@@ -1,0 +1,63 @@
+name: PolaCore Historical Executable Challenge Contract
+
+on:
+  push:
+    branches:
+      - codex/experiment/90-executable-challenge-historical
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Lab SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Prove #91 root unchanged and run historical hardening tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(sha256sum scripts/reviewer_executable_challenge.py | awk '{print $1}')" = '516f6f97d796b7d7614b05b177cabc2a51b3a7950aa14a8514443d5b9428a093'
+          python3 -m py_compile \
+            scripts/reviewer_executable_challenge.py \
+            scripts/reviewer_executable_historical.py \
+            tests/test_reviewer_executable_challenge.py \
+            tests/test_reviewer_executable_historical.py
+          python3 -m unittest -v \
+            tests/test_reviewer_executable_challenge.py \
+            tests/test_reviewer_executable_historical.py
+
+      - name: Prove no provider or publication boundary in historical runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            scripts/reviewer_executable_historical.py
+            tests/test_reviewer_executable_historical.py
+          )
+          ! grep -Eq 'ALBERT_API_KEY|GITHUB_TOKEN|secrets\.|albert\.api|api\.github\.com|contents: write|pull-requests: write|issues: write|gh pr|merge_pull_request' "${files[@]}"
+          grep -F 'EXECUTABLE_EVIDENCE_ONLY' scripts/reviewer_executable_historical.py >/dev/null
+          grep -F 'candidate-exported capability access is forbidden' scripts/reviewer_executable_historical.py >/dev/null
+          grep -F 'merge_governor.py' scripts/reviewer_executable_historical.py >/dev/null
+          grep -F 'merge_provider_capability.py' scripts/reviewer_executable_historical.py >/dev/null
+
+      - name: Report exact Lab identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "lab_sha=$(git rev-parse HEAD)"
+          sha256sum \
+            scripts/reviewer_executable_challenge.py \
+            scripts/reviewer_executable_historical.py \
+            tests/test_reviewer_executable_historical.py \
+            .github/workflows/agent-reviewer-executable-historical-contract.yml
