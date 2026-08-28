@@ -95,7 +95,11 @@ jobs:
           grep -F 'github.event.issue.number == 65' "$workflow" >/dev/null
           grep -F 'github.actor == github.repository_owner' "$workflow" >/dev/null
           grep -F "test \"\$GITHUB_REF\" = 'refs/heads/engineering'" "$workflow" >/dev/null
-          grep -F 'ref: ${{ github.sha }}' "$workflow" >/dev/null
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/agent-reviewer-provider-eval-critic-challenger.yml').read_text(encoding='utf-8')
+          assert ('ref: $' + '{{ github.sha }}') in text
+          PY
           grep -F 'persist-credentials: false' "$workflow" >/dev/null
           grep -F 'contents: read' "$workflow" >/dev/null
           grep -F 'qwen3-coder-30b-A3b-instruct' "$workflow" >/dev/null
