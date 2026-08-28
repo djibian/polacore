@@ -1,0 +1,87 @@
+name: PolaCore Executable Reviewer Challenge Contract
+
+on:
+  push:
+    branches:
+      - codex/experiment/90-executable-challenge-contract
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Lab SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Prove exact checkout and run adversarial contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile \
+            scripts/reviewer_executable_challenge.py \
+            tests/test_reviewer_executable_challenge.py
+          python3 -m unittest -v tests/test_reviewer_executable_challenge.py
+
+      - name: Exercise production CLI causal path
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          cat >"$tmp/challenge.json" <<'JSON'
+          {
+            "schema": "polacore.reviewer-executable-challenge/v1",
+            "name": "challenge_cli_causal",
+            "rationale": "Prove the same test distinguishes a faulty source from its repair.",
+            "code": "import candidate\nimport unittest\n\nclass CandidateTest(unittest.TestCase):\n    def test_value(self):\n        self.assertEqual(candidate.VALUE, 2)\n"
+          }
+          JSON
+          printf 'VALUE = 1\n' >"$tmp/candidate.py"
+          printf 'VALUE = 2\n' >"$tmp/repair.py"
+          python3 scripts/reviewer_executable_challenge.py validate \
+            --challenge "$tmp/challenge.json"
+          python3 scripts/reviewer_executable_challenge.py run-pair \
+            --challenge "$tmp/challenge.json" \
+            --candidate "$tmp/candidate.py" \
+            --repair "$tmp/repair.py" \
+            --candidate-sha synthetic-bad \
+            --repair-sha synthetic-good \
+            --out "$tmp/result.json"
+          python3 - "$tmp/result.json" <<'PY'
+          import json, pathlib, sys
+          value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert value["outcome"] == "DETECTED", value
+          assert value["candidate"]["status"] == "FAIL", value
+          assert value["repair"]["status"] == "PASS", value
+          assert value["authority"] == "EXECUTABLE_EVIDENCE_ONLY", value
+          PY
+
+      - name: Prove dry boundary has no provider or publication authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/agent-reviewer-executable-challenge-contract.yml
+          grep -F 'contents: read' "$workflow" >/dev/null
+          grep -F 'persist-credentials: false' "$workflow" >/dev/null
+          ! grep -Eq 'ALBERT_API_KEY|GITHUB_TOKEN|secrets\.|contents: write|pull-requests: write|issues: write|actions: write|checks: write|statuses: write|id-token: write' "$workflow"
+          ! grep -Eq 'gh pr|merge|approve|label|albert\.api|chat/completions' "$workflow"
+          ! grep -Eq 'ALBERT_API_KEY|GITHUB_TOKEN|albert\.api|api\.github\.com' scripts/reviewer_executable_challenge.py
+
+      - name: Report exact Lab identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "lab_sha=$(git rev-parse HEAD)"
+          sha256sum \
+            scripts/reviewer_executable_challenge.py \
+            tests/test_reviewer_executable_challenge.py \
+            .github/workflows/agent-reviewer-executable-challenge-contract.yml
