@@ -26,6 +26,7 @@ RESULT_SCHEMA = "polacore.reviewer-executable-result/v1"
 MAX_CODE_BYTES = 12_000
 MAX_RATIONALE = 600
 MAX_AST_NODES = 1_500
+MAX_OUTPUT_BYTES = 1_000_000
 DEFAULT_TIMEOUT_SECONDS = 4.0
 
 ALLOWED_IMPORT_ROOTS = {
@@ -41,10 +42,18 @@ FORBIDDEN_CALL_NAMES = {
     "__import__",
     "breakpoint",
     "compile",
+    "delattr",
+    "dir",
     "eval",
     "exec",
+    "getattr",
+    "globals",
+    "help",
     "input",
+    "locals",
     "open",
+    "setattr",
+    "vars",
 }
 FORBIDDEN_NODES = (
     ast.AsyncFunctionDef,
@@ -110,15 +119,18 @@ def validate_code(code: str) -> ast.Module:
                 root = alias.name.split(".", 1)[0]
                 if root not in ALLOWED_IMPORT_ROOTS:
                     raise UnsafeChallenge(f"forbidden import: {alias.name}")
+                if root in {"candidate", "unittest"} and alias.asname is not None:
+                    raise UnsafeChallenge(f"aliasing {root} is forbidden")
                 imported_candidate = imported_candidate or root == "candidate"
                 imported_unittest = imported_unittest or root == "unittest"
         elif isinstance(node, ast.ImportFrom):
             if node.level != 0 or not node.module:
                 raise UnsafeChallenge("relative/empty imports are forbidden")
             root = node.module.split(".", 1)[0]
+            if root == "candidate":
+                raise UnsafeChallenge("from candidate imports are forbidden")
             if root not in ALLOWED_IMPORT_ROOTS:
                 raise UnsafeChallenge(f"forbidden import: {node.module}")
-            imported_candidate = imported_candidate or root == "candidate"
             imported_unittest = imported_unittest or root == "unittest"
         elif isinstance(node, ast.Attribute):
             if node.attr.startswith("__"):
@@ -223,20 +235,78 @@ for item in sys.path:
 def within(path, base):
     return path == base or path.startswith(base + os.sep)
 
-def guarded_open(file, mode="r", *args, **kwargs):
+def require_read_path(file):
     path = os.path.realpath(os.fspath(file))
+    if not any(within(path, base) for base in read_roots):
+        raise RuntimeError("POLACORE_FS_READ_BLOCKED")
+    return path
+
+def require_write_path(file):
+    path = os.path.realpath(os.fspath(file))
+    if not within(path, root):
+        raise RuntimeError("POLACORE_FS_WRITE_BLOCKED")
+    return path
+
+def guarded_open(file, mode="r", *args, **kwargs):
     writing = any(flag in mode for flag in ("w", "a", "x", "+"))
     if writing:
-        if not within(path, root):
-            raise RuntimeError("POLACORE_FS_WRITE_BLOCKED")
-    elif not any(within(path, base) for base in read_roots):
-        raise RuntimeError("POLACORE_FS_READ_BLOCKED")
+        require_write_path(file)
+    else:
+        require_read_path(file)
     return original_open(file, mode, *args, **kwargs)
 
 builtins.open = guarded_open
+
+original_listdir = os.listdir
+original_scandir = os.scandir
+
+def guarded_listdir(path="."):
+    require_read_path(path)
+    return original_listdir(path)
+
+def guarded_scandir(path="."):
+    require_read_path(path)
+    return original_scandir(path)
+
+os.listdir = guarded_listdir
+os.scandir = guarded_scandir
+
+# Mutating filesystem operations are allowed only inside the disposable root.
+def guard_one_path(name):
+    original = getattr(os, name, None)
+    if original is None:
+        return
+    def guarded(path, *args, **kwargs):
+        require_write_path(path)
+        return original(path, *args, **kwargs)
+    setattr(os, name, guarded)
+
+for name in ("remove", "unlink", "rmdir", "mkdir", "chmod", "truncate", "mkfifo", "mknod"):
+    guard_one_path(name)
+
+for name in ("rename", "replace", "link", "symlink"):
+    original = getattr(os, name, None)
+    if original is None:
+        continue
+    def make_guarded_pair(function):
+        def guarded(src, dst, *args, **kwargs):
+            require_write_path(src)
+            require_write_path(dst)
+            return function(src, dst, *args, **kwargs)
+        return guarded
+    setattr(os, name, make_guarded_pair(original))
+
+original_chdir = os.chdir
+
+def guarded_chdir(path):
+    require_write_path(path)
+    return original_chdir(path)
+
+os.chdir = guarded_chdir
+
 for kind, value in (
     (resource.RLIMIT_CORE, (0, 0)),
-    (resource.RLIMIT_FSIZE, (1024 * 1024, 1024 * 1024)),
+    (resource.RLIMIT_FSIZE, (1000000, 1000000)),
     (resource.RLIMIT_NOFILE, (64, 64)),
     (resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024)),
 ):
@@ -256,9 +326,14 @@ raise SystemExit(0 if result.wasSuccessful() else 1)
 '''
 
 
-def _bounded_digest(text: str) -> dict[str, Any]:
-    data = text.encode("utf-8", errors="replace")
+def _bounded_digest(data: bytes) -> dict[str, Any]:
     return {"bytes": len(data), "sha256": _sha256(data)}
+
+
+def _read_output(path: Path) -> tuple[dict[str, Any], bool]:
+    data = path.read_bytes()
+    overflow = len(data) >= MAX_OUTPUT_BYTES
+    return _bounded_digest(data), overflow
 
 
 def _run_source(
@@ -271,6 +346,8 @@ def _run_source(
         root = Path(tmp)
         (root / "candidate.py").write_bytes(source)
         (root / "challenge_test.py").write_text(challenge["code"], encoding="utf-8")
+        stdout_path = root / "stdout.bin"
+        stderr_path = root / "stderr.bin"
         env = {
             "HOME": str(root),
             "LANG": "C.UTF-8",
@@ -278,40 +355,42 @@ def _run_source(
             "PATH": os.path.dirname(sys.executable),
             "TZ": "UTC",
         }
+        status = "RUNNER_ERROR"
+        returncode: int | None = None
+        error: str | None = None
         try:
-            proc = subprocess.run(
-                [sys.executable, "-I", "-c", _LAUNCHER, str(root)],
-                cwd=root,
-                env=env,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            stdout = exc.stdout.decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-            stderr = exc.stderr.decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-            return {
-                "status": "TIMEOUT",
-                "returncode": None,
-                "stdout": _bounded_digest(stdout),
-                "stderr": _bounded_digest(stderr),
-            }
+            with stdout_path.open("wb") as stdout_handle, stderr_path.open("wb") as stderr_handle:
+                proc = subprocess.run(
+                    [sys.executable, "-I", "-c", _LAUNCHER, str(root)],
+                    cwd=root,
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=stdout_handle,
+                    stderr=stderr_handle,
+                    timeout=timeout_seconds,
+                    check=False,
+                )
+            returncode = proc.returncode
+            status = "PASS" if proc.returncode == 0 else "FAIL"
+        except subprocess.TimeoutExpired:
+            status = "TIMEOUT"
         except OSError as exc:
-            return {
-                "status": "RUNNER_ERROR",
-                "returncode": None,
-                "error": type(exc).__name__,
-                "stdout": _bounded_digest(""),
-                "stderr": _bounded_digest(""),
-            }
-        return {
-            "status": "PASS" if proc.returncode == 0 else "FAIL",
-            "returncode": proc.returncode,
-            "stdout": _bounded_digest(proc.stdout),
-            "stderr": _bounded_digest(proc.stderr),
+            status = "RUNNER_ERROR"
+            error = type(exc).__name__
+
+        stdout, stdout_overflow = _read_output(stdout_path)
+        stderr, stderr_overflow = _read_output(stderr_path)
+        if stdout_overflow or stderr_overflow:
+            status = "OUTPUT_LIMIT"
+        result: dict[str, Any] = {
+            "status": status,
+            "returncode": returncode,
+            "stdout": stdout,
+            "stderr": stderr,
         }
+        if error is not None:
+            result["error"] = error
+        return result
 
 
 def run_pair(
@@ -326,7 +405,7 @@ def run_pair(
     challenge = validate_challenge(challenge_value)
     candidate = _run_source(candidate_source, challenge, timeout_seconds=timeout_seconds)
     repair = _run_source(repair_source, challenge, timeout_seconds=timeout_seconds)
-    uncertain = {"TIMEOUT", "RUNNER_ERROR"}
+    uncertain = {"TIMEOUT", "RUNNER_ERROR", "OUTPUT_LIMIT"}
     if candidate["status"] in uncertain or repair["status"] in uncertain:
         outcome = "UNPROVEN"
     elif candidate["status"] == "FAIL" and repair["status"] == "PASS":
@@ -358,7 +437,7 @@ def run_control(
 ) -> dict[str, Any]:
     challenge = validate_challenge(challenge_value)
     result = _run_source(source, challenge, timeout_seconds=timeout_seconds)
-    if result["status"] in {"TIMEOUT", "RUNNER_ERROR"}:
+    if result["status"] in {"TIMEOUT", "RUNNER_ERROR", "OUTPUT_LIMIT"}:
         outcome = "UNPROVEN"
     elif result["status"] == "PASS":
         outcome = "CLEAN_CONTROL"
