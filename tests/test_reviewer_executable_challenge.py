@@ -48,6 +48,28 @@ class CandidateTest(unittest.TestCase):
         with self.assertRaises(rec.UnsafeChallenge):
             rec.validate_challenge(make_challenge(code))
 
+    def test_candidate_alias_is_rejected(self):
+        code = """import candidate as c
+import unittest
+
+class CandidateTest(unittest.TestCase):
+    def test_value(self):
+        self.assertTrue(c.VALUE)
+"""
+        with self.assertRaises(rec.UnsafeChallenge):
+            rec.validate_challenge(make_challenge(code))
+
+    def test_from_candidate_import_is_rejected(self):
+        code = """from candidate import VALUE
+import unittest
+
+class CandidateTest(unittest.TestCase):
+    def test_value(self):
+        self.assertTrue(VALUE)
+"""
+        with self.assertRaises(rec.UnsafeChallenge):
+            rec.validate_challenge(make_challenge(code))
+
     def test_reflective_getattr_escape_is_rejected(self):
         code = """import candidate
 import unittest
@@ -177,6 +199,23 @@ class CandidateTest(unittest.TestCase):
         result = rec.run_control(make_challenge(code), source)
         self.assertEqual(result["outcome"], "CLEAN_CONTROL")
 
+    def test_filesystem_mutation_outside_workspace_is_blocked(self):
+        source = b"""import os
+
+def mutate_outside():
+    os.remove(\"/tmp/polacore-outside-workspace\")
+"""
+        code = """import candidate
+import unittest
+
+class CandidateTest(unittest.TestCase):
+    def test_mutation_blocked(self):
+        with self.assertRaises(RuntimeError):
+            candidate.mutate_outside()
+"""
+        result = rec.run_control(make_challenge(code), source)
+        self.assertEqual(result["outcome"], "CLEAN_CONTROL")
+
     def test_parent_secrets_are_not_in_child_environment(self):
         old_albert = rec.os.environ.get("ALBERT_API_KEY")
         old_github = rec.os.environ.get("GITHUB_TOKEN")
@@ -228,6 +267,22 @@ class CandidateTest(unittest.TestCase):
         )
         self.assertEqual(result["candidate"]["status"], "TIMEOUT")
         self.assertEqual(result["outcome"], "UNPROVEN")
+
+    def test_output_limit_is_unproven(self):
+        source = b"""def spam():
+    print(\"x\" * 1100000)
+"""
+        code = """import candidate
+import unittest
+
+class CandidateTest(unittest.TestCase):
+    def test_spam(self):
+        candidate.spam()
+"""
+        result = rec.run_control(make_challenge(code), source, timeout_seconds=2.0)
+        self.assertEqual(result["candidate"]["status"], "OUTPUT_LIMIT")
+        self.assertEqual(result["outcome"], "UNPROVEN")
+        self.assertLessEqual(result["candidate"]["stdout"]["bytes"], rec.MAX_OUTPUT_BYTES)
 
 
 if __name__ == "__main__":
