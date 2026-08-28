@@ -1,0 +1,82 @@
+name: PolaCore Executable Reviewer Live Architecture Contract
+
+on:
+  push:
+    branches:
+      - codex/experiment/90-executable-challenge-live
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Lab SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Prove trusted roots unchanged and run deterministic contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(sha256sum scripts/reviewer_executable_challenge.py | awk '{print $1}')" = '516f6f97d796b7d7614b05b177cabc2a51b3a7950aa14a8514443d5b9428a093'
+          test "$(sha256sum scripts/reviewer_executable_historical.py | awk '{print $1}')" = '3a4a3f2fd13f503f09dce233bdb3777925eb6308499a6002b57cbab22a55b24c'
+          python3 -m py_compile \
+            scripts/reviewer_executable_blind.py \
+            scripts/reviewer_challenge_structured_transport.py \
+            scripts/reviewer_executable_oracle.py \
+            tests/test_reviewer_executable_live_contract.py
+          python3 -m unittest -v \
+            tests/test_reviewer_executable_challenge.py \
+            tests/test_reviewer_executable_historical.py \
+            tests/test_reviewer_executable_live_contract.py
+
+      - name: Prove model-facing files contain no hidden oracle metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          model_files=(
+            scripts/reviewer_executable_blind.py
+            scripts/reviewer_challenge_structured_transport.py
+            .opencode/agents/reviewer-executable-challenge-qwen.md
+          )
+          ! grep -Eq 'H1|H2|H3|H4|c790315c92663aa7b15b9a626ae5d9fc07d3e378|9a653e50d1bec813ae738106cd65e0b2cde29dcb|a821bcae50dadfd3f4d758056585162065d6ea30' "${model_files[@]}"
+          grep -F 'qwen3-coder-30b-A3b-instruct' scripts/reviewer_challenge_structured_transport.py >/dev/null
+          grep -F 'tool_choice' scripts/reviewer_challenge_structured_transport.py >/dev/null
+          grep -F 'INFERENCE ONLY' .opencode/agents/reviewer-executable-challenge-qwen.md >/dev/null
+          grep -F 'do not use or request tools' .opencode/agents/reviewer-executable-challenge-qwen.md >/dev/null
+
+      - name: Prove hidden oracle has no provider or publication capability
+        shell: bash
+        run: |
+          set -euo pipefail
+          oracle=scripts/reviewer_executable_oracle.py
+          grep -F 'c790315c92663aa7b15b9a626ae5d9fc07d3e378' "$oracle" >/dev/null
+          grep -F '9a653e50d1bec813ae738106cd65e0b2cde29dcb' "$oracle" >/dev/null
+          grep -F 'a821bcae50dadfd3f4d758056585162065d6ea30' "$oracle" >/dev/null
+          ! grep -Eq 'ALBERT_API_KEY|secrets\.|albert\.api|chat/completions|api\.github\.com|contents: write|pull-requests: write|issues: write|gh pr|merge_pull_request' "$oracle"
+          grep -F 'EXECUTABLE_EVIDENCE_ONLY' "$oracle" >/dev/null
+          grep -F 'This experiment does not amend #48' "$oracle" >/dev/null
+
+      - name: Report exact Lab identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "lab_sha=$(git rev-parse HEAD)"
+          sha256sum \
+            scripts/reviewer_executable_challenge.py \
+            scripts/reviewer_executable_historical.py \
+            scripts/reviewer_executable_blind.py \
+            scripts/reviewer_challenge_structured_transport.py \
+            scripts/reviewer_executable_oracle.py \
+            .opencode/agents/reviewer-executable-challenge-qwen.md \
+            tests/test_reviewer_executable_live_contract.py \
+            .github/workflows/agent-reviewer-executable-live-contract.yml
