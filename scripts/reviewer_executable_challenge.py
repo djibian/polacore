@@ -189,12 +189,17 @@ root = os.path.realpath(sys.argv[1])
 def blocked(*args, **kwargs):
     raise RuntimeError("POLACORE_SANDBOX_BLOCKED")
 
-# Generated tests cannot import these modules, but candidate code may. Block the
-# dangerous capabilities again at runtime so candidate execution remains bounded.
-socket.socket = blocked
-socket.create_connection = blocked
-if hasattr(socket, "socketpair"):
-    socket.socketpair = blocked
+# Keep the socket class import-compatible for urllib/http/ssl, but block every
+# operation capable of establishing or accepting network communication.
+for name in ("connect", "connect_ex", "bind", "listen", "accept", "sendto", "recvfrom"):
+    if hasattr(socket.socket, name):
+        setattr(socket.socket, name, blocked)
+for name in ("create_connection", "create_server", "socketpair"):
+    if hasattr(socket, name):
+        setattr(socket, name, blocked)
+
+# Generated tests cannot import process modules; candidate code may, so block
+# process creation/exec again at runtime.
 for name in ("Popen", "run", "call", "check_call", "check_output"):
     if hasattr(subprocess, name):
         setattr(subprocess, name, blocked)
@@ -207,14 +212,25 @@ for name in (
         setattr(os, name, blocked)
 
 original_open = builtins.open
+read_roots = [root]
+for item in sys.path:
+    if item:
+        try:
+            read_roots.append(os.path.realpath(item))
+        except (OSError, TypeError):
+            pass
+
+def within(path, base):
+    return path == base or path.startswith(base + os.sep)
 
 def guarded_open(file, mode="r", *args, **kwargs):
-    # Generated code is statically forbidden from calling open. Candidate code
-    # may read normal runtime/module files, but may only write inside its temp root.
-    if any(flag in mode for flag in ("w", "a", "x", "+")):
-        path = os.path.realpath(os.fspath(file))
-        if path != root and not path.startswith(root + os.sep):
+    path = os.path.realpath(os.fspath(file))
+    writing = any(flag in mode for flag in ("w", "a", "x", "+"))
+    if writing:
+        if not within(path, root):
             raise RuntimeError("POLACORE_FS_WRITE_BLOCKED")
+    elif not any(within(path, base) for base in read_roots):
+        raise RuntimeError("POLACORE_FS_READ_BLOCKED")
     return original_open(file, mode, *args, **kwargs)
 
 builtins.open = guarded_open
@@ -260,6 +276,7 @@ def _run_source(
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
             "PATH": os.path.dirname(sys.executable),
+            "TZ": "UTC",
         }
         try:
             proc = subprocess.run(
