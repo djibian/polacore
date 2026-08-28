@@ -5,6 +5,7 @@ on:
     branches:
       - codex/experiment/65-multipass-mistral
       - codex/experiment/65-multipass-cli-import-fix
+      - codex/experiment/65-negative-control-polarity
   workflow_dispatch:
 
 permissions:
@@ -44,16 +45,19 @@ jobs:
           python3 -m py_compile \
             scripts/reviewer_provider_eval.py \
             scripts/reviewer_provider_eval_mistral.py \
+            scripts/reviewer_provider_eval_mistral_polarity.py \
             scripts/reviewer_provider_structured_transport.py \
             scripts/agent_reviewer_validate.py \
             scripts/reviewer_multipass_aggregate.py \
             scripts/reviewer_multipass_benchmark.py \
             tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_eval_mistral_polarity.py \
             tests/test_reviewer_provider_structured_transport.py \
             tests/test_reviewer_multipass_aggregate.py \
             tests/test_reviewer_multipass_benchmark.py
           python3 -m unittest -v \
             tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_eval_mistral_polarity.py \
             tests/test_reviewer_provider_structured_transport.py \
             tests/test_reviewer_multipass_aggregate.py \
             tests/test_reviewer_multipass_benchmark.py
@@ -79,6 +83,36 @@ jobs:
           assert record['status'] == 'VALID'
           assert record['pass_id'] == 'behavioral_semantics'
           assert record['decision']['verdict'] == 'READY_FOR_HUMAN'
+          PY
+
+      - name: Prove H4 polarity without weakening H1-H3 scorer
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(sha256sum scripts/reviewer_provider_eval.py | awk '{print $1}')" = '7fa5dd44752f97d7e2ae0f86015c627880e4857c2283bfddc6d5d43f0826dcbc'
+          tmp="$(mktemp -d)"
+          cat >"$tmp/repaired.json" <<'JSON'
+          {"verdict":"READY_FOR_HUMAN","confidence":0.95,"rationale":"The client uses a fixed endpoint allowlist, requires a non-empty token, and rejects redirects before authentication can leave the trusted destination."}
+          JSON
+          python3 scripts/reviewer_provider_eval_mistral_polarity.py score \
+            --case H4 --decision "$tmp/repaired.json" --out "$tmp/repaired-score.json"
+          python3 - "$tmp/repaired-score.json" <<'PY'
+          import json,sys
+          row=json.load(open(sys.argv[1], encoding='utf-8'))
+          assert row['known_signature_matches']['H3'] is True
+          assert row['known_defect_claims']['H3'] is False
+          assert row['status'] == 'CLEAN_CONTROL'
+          PY
+          cat >"$tmp/leak.json" <<'JSON'
+          {"verdict":"READY_FOR_HUMAN","confidence":0.95,"rationale":"Authorization token is still replayed across redirects to another target."}
+          JSON
+          python3 scripts/reviewer_provider_eval_mistral_polarity.py score \
+            --case H4 --decision "$tmp/leak.json" --out "$tmp/leak-score.json"
+          python3 - "$tmp/leak-score.json" <<'PY'
+          import json,sys
+          row=json.load(open(sys.argv[1], encoding='utf-8'))
+          assert row['known_defect_claims']['H3'] is True
+          assert row['status'] == 'FALSE_POSITIVE'
           PY
 
       - name: Prove blind prompt separation and pass independence
@@ -163,8 +197,12 @@ jobs:
           set -euo pipefail
           echo "lab_sha=$(git rev-parse HEAD)"
           sha256sum \
+            scripts/reviewer_provider_eval.py \
+            scripts/reviewer_provider_eval_mistral_polarity.py \
             scripts/reviewer_multipass_aggregate.py \
             scripts/reviewer_multipass_benchmark.py \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_eval_mistral_polarity.py \
             tests/test_reviewer_multipass_aggregate.py \
             tests/test_reviewer_multipass_benchmark.py \
             .opencode/agents/reviewer-multipass-mistral-behavioral.md \
