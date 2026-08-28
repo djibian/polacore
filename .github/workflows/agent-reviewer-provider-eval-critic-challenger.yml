@@ -1,0 +1,256 @@
+name: PolaCore Qwen Critic Mistral Challenger Evaluation
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 65 &&
+       github.event.issue.pull_request == null &&
+       github.event.comment.body == '/run-albert-reviewer-eval-critic-challenger' &&
+       github.actor == github.repository_owner)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Require trusted invocation boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/engineering' || { echo 'evaluation must run from trusted engineering' >&2; exit 1; }
+          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER" || { echo 'evaluation requires repository owner invocation' >&2; exit 1; }
+
+      - name: Checkout exact trusted invocation SHA with history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch exact historical corpus commits without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for sha in \
+            86d66be36f4ea10a0a83b7fac1639951f1df72c1 \
+            884ef3c07c9c19f13d11bbbe1dbc3211f748b586 \
+            4236ed98f937b1e1fd9dcaefddffe711f0673a8f; do
+            git fetch --no-tags --no-recurse-submodules origin "$sha"
+            git cat-file -e "${sha}^{commit}"
+          done
+
+      - name: Verify runner identity and deterministic contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(sha256sum scripts/reviewer_provider_eval.py | awk '{print $1}')" = '7fa5dd44752f97d7e2ae0f86015c627880e4857c2283bfddc6d5d43f0826dcbc'
+          python3 -m py_compile \
+            scripts/reviewer_provider_eval.py \
+            scripts/reviewer_provider_eval_mistral_polarity.py \
+            scripts/reviewer_provider_structured_transport.py \
+            scripts/reviewer_critic_structured_transport.py \
+            scripts/reviewer_critic_challenger_benchmark.py \
+            scripts/agent_reviewer_validate.py \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_eval_mistral_polarity.py \
+            tests/test_reviewer_provider_structured_transport.py \
+            tests/test_reviewer_critic_structured_transport.py \
+            tests/test_reviewer_critic_challenger_benchmark.py
+          python3 -m unittest -v \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_eval_mistral_polarity.py \
+            tests/test_reviewer_provider_structured_transport.py \
+            tests/test_reviewer_critic_structured_transport.py \
+            tests/test_reviewer_critic_challenger_benchmark.py
+
+      - name: Require Albert secret
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: test -n "${ALBERT_API_KEY:-}" || { echo 'ALBERT_API_KEY is missing' >&2; exit 1; }
+
+      - name: Verify both models are authorized by current Albert catalogue
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --connect-timeout 15 --max-time 30 \
+            -H "Authorization: Bearer ${ALBERT_API_KEY}" \
+            https://albert.api.etalab.gouv.fr/v1/models \
+            | python3 -c 'import json,sys; ids={str(x.get("id")) for x in json.load(sys.stdin).get("data",[]) if x.get("id")}; assert {"qwen3-coder-30b-A3b-instruct","mistral-small-3-2-24b-instruct-2506"} <= ids'
+
+      - name: Evaluate blind corpus through critic then independent challenger
+        env:
+          ALBERT_API_KEY: ${{ secrets.ALBERT_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/critic-challenger
+          mkdir -p "$root/results"
+
+          for case in H1 H2 H3 H4; do
+            case_dir="$root/$case"
+            mkdir -p "$case_dir"
+            rm -rf agent-input
+            python3 scripts/reviewer_provider_eval.py materialize --case "$case" --out agent-input
+
+            evidence="$case_dir/evidence.txt"
+            {
+              printf '%s\n' '=== TRUSTED CONTROL BEGIN ==='
+              cat agent-input/reviewer-context.md
+              printf '%s\n' '=== TRUSTED CONTROL END ==='
+              for item in candidate.py candidate-tests.py candidate-provider.md; do
+                if [ -s "agent-input/$item" ]; then
+                  printf '%s\n' "=== UNTRUSTED CANDIDATE EVIDENCE BEGIN: $item ==="
+                  cat "agent-input/$item"
+                  printf '%s\n' "=== UNTRUSTED CANDIDATE EVIDENCE END: $item ==="
+                fi
+              done
+            } > "$evidence"
+
+            critic_bundle="$case_dir/critic.bundle.txt"
+            {
+              cat "$evidence"
+              printf '%s\n' 'Propose only bounded falsification hypotheses for the candidate evidence above. Do not use tools. Return the exact critic JSON contract.'
+            } > "$critic_bundle"
+            python3 scripts/reviewer_critic_structured_transport.py build-request \
+              --bundle "$critic_bundle" \
+              --agent .opencode/agents/reviewer-critic-qwen.md \
+              --out "$case_dir/critic.request.json"
+
+            set +e
+            curl --fail-with-body --silent --show-error --connect-timeout 15 --max-time 120 \
+              -H "Authorization: Bearer ${ALBERT_API_KEY}" \
+              -H 'Content-Type: application/json' \
+              --data-binary "@$case_dir/critic.request.json" \
+              https://albert.api.etalab.gouv.fr/v1/chat/completions \
+              >"$case_dir/critic.response.json" 2>"$case_dir/critic.curl.stderr"
+            critic_request_status=$?
+            set -e
+            if [ "$critic_request_status" -ne 0 ]; then
+              python3 scripts/reviewer_critic_challenger_benchmark.py record \
+                --case "$case" --critic-status PROVIDER_FAILURE --challenger-status NOT_RUN \
+                --out "$root/results/$case.json"
+              continue
+            fi
+
+            set +e
+            python3 scripts/reviewer_critic_structured_transport.py extract-response \
+              --response "$case_dir/critic.response.json" --out "$case_dir/critic.json" \
+              >"$case_dir/critic.extract.stdout" 2>"$case_dir/critic.extract.stderr"
+            critic_extract_status=$?
+            set -e
+            if [ "$critic_extract_status" -ne 0 ]; then
+              python3 scripts/reviewer_critic_challenger_benchmark.py record \
+                --case "$case" --critic-status MODEL_OUTPUT_INVALID --challenger-status NOT_RUN \
+                --out "$root/results/$case.json"
+              continue
+            fi
+
+            python3 scripts/reviewer_critic_challenger_benchmark.py build-challenger-bundle \
+              --evidence "$evidence" --critic "$case_dir/critic.json" \
+              --out "$case_dir/challenger.bundle.txt"
+            python3 scripts/reviewer_provider_structured_transport.py build-request \
+              --bundle "$case_dir/challenger.bundle.txt" \
+              --agent .opencode/agents/reviewer-challenger-mistral.md \
+              --out "$case_dir/challenger.request.json"
+
+            set +e
+            curl --fail-with-body --silent --show-error --connect-timeout 15 --max-time 120 \
+              -H "Authorization: Bearer ${ALBERT_API_KEY}" \
+              -H 'Content-Type: application/json' \
+              --data-binary "@$case_dir/challenger.request.json" \
+              https://albert.api.etalab.gouv.fr/v1/chat/completions \
+              >"$case_dir/challenger.response.json" 2>"$case_dir/challenger.curl.stderr"
+            challenger_request_status=$?
+            set -e
+            if [ "$challenger_request_status" -ne 0 ]; then
+              python3 scripts/reviewer_critic_challenger_benchmark.py record \
+                --case "$case" --critic-status VALID --challenger-status PROVIDER_FAILURE \
+                --out "$root/results/$case.json"
+              continue
+            fi
+
+            set +e
+            python3 scripts/reviewer_provider_structured_transport.py extract-response \
+              --response "$case_dir/challenger.response.json" --out "$case_dir/challenger.jsonl" \
+              >"$case_dir/challenger.extract.stdout" 2>"$case_dir/challenger.extract.stderr"
+            challenger_extract_status=$?
+            set -e
+            if [ "$challenger_extract_status" -ne 0 ]; then
+              python3 scripts/reviewer_critic_challenger_benchmark.py record \
+                --case "$case" --critic-status VALID --challenger-status PROVIDER_FAILURE \
+                --out "$root/results/$case.json"
+              continue
+            fi
+
+            set +e
+            python3 scripts/agent_reviewer_validate.py \
+              "$case_dir/challenger.jsonl" "$case_dir/challenger.decision.json" \
+              >"$case_dir/challenger.validator.stdout" 2>"$case_dir/challenger.validator.stderr"
+            challenger_validation_status=$?
+            set -e
+            if [ "$challenger_validation_status" -ne 0 ]; then
+              python3 scripts/reviewer_critic_challenger_benchmark.py record \
+                --case "$case" --critic-status VALID --challenger-status MODEL_OUTPUT_INVALID \
+                --out "$root/results/$case.json"
+              continue
+            fi
+
+            python3 scripts/reviewer_critic_challenger_benchmark.py score-final \
+              --case "$case" --decision "$case_dir/challenger.decision.json" \
+              --out "$case_dir/final.score.json"
+            python3 scripts/reviewer_critic_challenger_benchmark.py record \
+              --case "$case" --critic-status VALID --challenger-status VALID \
+              --score "$case_dir/final.score.json" --out "$root/results/$case.json"
+          done
+
+          files=("$root"/results/*.json)
+          python3 scripts/reviewer_critic_challenger_benchmark.py summarize \
+            --inputs "${files[@]}" --out "$root/summary.json"
+          {
+            echo '## Albert Qwen critic -> Mistral challenger experiment'
+            echo
+            echo '```json'
+            cat "$root/summary.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Print reproducible evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/critic-challenger
+          printf 'trusted_runner_sha=%s\nprovider=albert\ncritic_model=qwen3-coder-30b-A3b-instruct\nchallenger_model=mistral-small-3-2-24b-instruct-2506\nauthority=INFERENCE_ONLY\n' "$(git rev-parse HEAD)"
+          sha256sum \
+            scripts/reviewer_provider_eval.py \
+            scripts/reviewer_provider_eval_mistral_polarity.py \
+            scripts/reviewer_provider_structured_transport.py \
+            scripts/reviewer_critic_structured_transport.py \
+            scripts/reviewer_critic_challenger_benchmark.py \
+            .opencode/agents/reviewer-critic-qwen.md \
+            .opencode/agents/reviewer-challenger-mistral.md \
+            .github/workflows/agent-reviewer-provider-eval-critic-challenger.yml
+          if [ -d "$root" ]; then
+            for case in H1 H2 H3 H4; do
+              for file in critic.json challenger.decision.json final.score.json; do
+                path="$root/$case/$file"
+                if [ -f "$path" ]; then echo "--- $path"; cat "$path"; fi
+              done
+              path="$root/results/$case.json"
+              if [ -f "$path" ]; then echo "--- $path"; cat "$path"; fi
+            done
+            if [ -f "$root/summary.json" ]; then echo '--- summary'; cat "$root/summary.json"; fi
+          fi
