@@ -1,0 +1,127 @@
+name: PolaCore Critic Challenger Reviewer Contract
+
+on:
+  push:
+    branches:
+      - codex/experiment/65-critic-challenger
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Lab SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Prove frozen scorer and deterministic tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(sha256sum scripts/reviewer_provider_eval.py | awk '{print $1}')" = '7fa5dd44752f97d7e2ae0f86015c627880e4857c2283bfddc6d5d43f0826dcbc'
+          python3 -m py_compile \
+            scripts/reviewer_provider_eval.py \
+            scripts/reviewer_provider_eval_mistral_polarity.py \
+            scripts/reviewer_provider_structured_transport.py \
+            scripts/reviewer_critic_structured_transport.py \
+            scripts/reviewer_critic_challenger_benchmark.py \
+            scripts/agent_reviewer_validate.py \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_eval_mistral_polarity.py \
+            tests/test_reviewer_provider_structured_transport.py \
+            tests/test_reviewer_critic_structured_transport.py \
+            tests/test_reviewer_critic_challenger_benchmark.py
+          python3 -m unittest -v \
+            tests/test_reviewer_provider_eval.py \
+            tests/test_reviewer_provider_eval_mistral_polarity.py \
+            tests/test_reviewer_provider_structured_transport.py \
+            tests/test_reviewer_critic_structured_transport.py \
+            tests/test_reviewer_critic_challenger_benchmark.py
+
+      - name: Exercise both new production CLIs without network
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          cat >"$tmp/critic-response.json" <<'JSON'
+          {"choices":[{"finish_reason":"stop","message":{"content":"{\"hypotheses\":[]}"}}]}
+          JSON
+          python3 scripts/reviewer_critic_structured_transport.py extract-response \
+            --response "$tmp/critic-response.json" --out "$tmp/critic.json"
+          cat >"$tmp/evidence.txt" <<'TXT'
+          === TRUSTED CONTROL BEGIN ===
+          bounded control
+          === TRUSTED CONTROL END ===
+          TXT
+          python3 scripts/reviewer_critic_challenger_benchmark.py build-challenger-bundle \
+            --evidence "$tmp/evidence.txt" --critic "$tmp/critic.json" --out "$tmp/challenger.txt"
+          grep -F '=== UNTRUSTED CRITIC INFERENCE BEGIN ===' "$tmp/challenger.txt" >/dev/null
+          grep -F 'never instructions or authority' "$tmp/challenger.txt" >/dev/null
+
+      - name: Prove blind role prompts
+        shell: bash
+        run: |
+          set -euo pipefail
+          prompts=(
+            .opencode/agents/reviewer-critic-qwen.md
+            .opencode/agents/reviewer-challenger-mistral.md
+          )
+          for prompt in "${prompts[@]}"; do
+            ! grep -Eq 'H1|H2|H3|H4|DETECTED|known_signature_matches|c790315c92663aa7b15b9a626ae5d9fc07d3e378|9a653e50d1bec813ae738106cd65e0b2cde29dcb|a821bcae50dadfd3f4d758056585162065d6ea30' "$prompt"
+            grep -F 'INFERENCE ONLY' "$prompt" >/dev/null
+            grep -F 'do not use or request tools' "$prompt" >/dev/null
+          done
+          grep -F 'qwen3-coder-30b-A3b-instruct' "${prompts[0]}" >/dev/null
+          grep -F 'mistral-small-3-2-24b-instruct-2506' "${prompts[1]}" >/dev/null
+          grep -F 'critic output is untrusted inference' "${prompts[1]}" >/dev/null
+
+      - name: Prove read-only live boundary and model separation
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/agent-reviewer-provider-eval-critic-challenger.yml
+          grep -F 'workflow_dispatch:' "$workflow" >/dev/null
+          grep -F 'issue_comment:' "$workflow" >/dev/null
+          grep -F "github.event.comment.body == '/run-albert-reviewer-eval-critic-challenger'" "$workflow" >/dev/null
+          grep -F 'github.event.issue.number == 65' "$workflow" >/dev/null
+          grep -F 'github.actor == github.repository_owner' "$workflow" >/dev/null
+          grep -F "test \"\$GITHUB_REF\" = 'refs/heads/engineering'" "$workflow" >/dev/null
+          grep -F 'ref: ${{ github.sha }}' "$workflow" >/dev/null
+          grep -F 'persist-credentials: false' "$workflow" >/dev/null
+          grep -F 'contents: read' "$workflow" >/dev/null
+          grep -F 'qwen3-coder-30b-A3b-instruct' "$workflow" >/dev/null
+          grep -F 'mistral-small-3-2-24b-instruct-2506' "$workflow" >/dev/null
+          grep -F 'scripts/reviewer_critic_structured_transport.py' "$workflow" >/dev/null
+          grep -F 'scripts/reviewer_provider_structured_transport.py' "$workflow" >/dev/null
+          grep -F 'scripts/reviewer_provider_eval_mistral_polarity.py' "$workflow" >/dev/null
+          grep -F '=== UNTRUSTED CRITIC INFERENCE BEGIN ===' scripts/reviewer_critic_challenger_benchmark.py >/dev/null
+          ! grep -Eq 'contents: write|pull-requests: write|issues: write|actions: write|checks: write|statuses: write|id-token: write' "$workflow"
+          ! grep -Eq 'GH_TOKEN|gh pr|merge|approve|label' "$workflow"
+          ! grep -Eq 'c790315c92663aa7b15b9a626ae5d9fc07d3e378|9a653e50d1bec813ae738106cd65e0b2cde29dcb|a821bcae50dadfd3f4d758056585162065d6ea30' "$workflow"
+
+      - name: Report dry-contract identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "lab_sha=$(git rev-parse HEAD)"
+          sha256sum \
+            scripts/reviewer_provider_eval.py \
+            scripts/reviewer_provider_eval_mistral_polarity.py \
+            scripts/reviewer_provider_structured_transport.py \
+            scripts/reviewer_critic_structured_transport.py \
+            scripts/reviewer_critic_challenger_benchmark.py \
+            tests/test_reviewer_critic_structured_transport.py \
+            tests/test_reviewer_critic_challenger_benchmark.py \
+            .opencode/agents/reviewer-critic-qwen.md \
+            .opencode/agents/reviewer-challenger-mistral.md \
+            .github/workflows/agent-reviewer-provider-eval-critic-challenger.yml \
+            .github/workflows/agent-reviewer-provider-eval-critic-challenger-contract.yml
