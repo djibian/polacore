@@ -13,3 +13,7 @@ A fully compromised third-party component must not be able to compromise the CMS
 Architecture, engineering, and red-team work evolve together. Security claims should be backed by primary sources, reproducible tests, or explicit formal reasoning, and unproven assumptions should remain identified as such.
 
 The repository will progressively host the executable prototypes, security tests, implementation decisions, migration tooling, and eventually the CMS itself.
+
+## License
+
+Except where explicitly indicated otherwise, PolaCore is licensed under the **GNU Affero General Public License version 3.0 only (`AGPL-3.0-only`)**. See [LICENSE](LICENSE) for the full terms. Third-party components and materials retain their respective licenses.
